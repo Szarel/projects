@@ -1,6 +1,7 @@
 from typing import AsyncIterator
 
 import logging
+import ssl
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -31,13 +32,30 @@ def _sanitize_database_url(raw_url: str) -> tuple[URL, dict]:
         url = url.set(query=query)
 
     connect_args: dict = {}
-    if sslmode in {"require", "verify-full", "verify-ca", "prefer"}:
-        connect_args["ssl"] = True
-    elif sslmode == "disable":
+    # libpq semantics:
+    # - require/prefer: encrypt without verifying cert chain/hostname
+    # - verify-ca/verify-full: verify certificate (and hostname for verify-full)
+    if sslmode == "disable":
         connect_args["ssl"] = False
     else:
-        # Default for Neon: require TLS even if sslmode not provided
-        connect_args["ssl"] = True
+        # Default is TLS on (Neon/Supabase require it). If sslmode is missing, treat as "require".
+        effective_mode = sslmode or "require"
+        if effective_mode in {"require", "prefer"}:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            connect_args["ssl"] = ctx
+        elif effective_mode in {"verify-ca", "verify-full"}:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = effective_mode == "verify-full"
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            connect_args["ssl"] = ctx
+        else:
+            # Unknown value: safest fallback is TLS without hostname verification.
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            connect_args["ssl"] = ctx
 
     logger.info(
         "DB URL (masked): driver=%s host=%s db=%s user=%s sslmode=%s channel_binding=%s",
