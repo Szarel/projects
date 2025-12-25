@@ -15,29 +15,49 @@ class Base(DeclarativeBase):
     """Declarative base for ORM models."""
 
 
-def _sanitize_database_url(raw_url: str) -> URL:
-    """Drop ssl-related query params that asyncpg rejects; TLS enforced via connect_args."""
+def _sanitize_database_url(raw_url: str) -> tuple[URL, dict]:
+    """Preserve incoming query params; translate sslmode to connect_args for asyncpg."""
     url = make_url(raw_url.strip())
-    # Force asyncpg driver when Postgres URL lacks it (Render/Neon often provide plain postgresql://)
     if url.drivername in {"postgresql", "postgres", "postgresql+psycopg2"}:
         url = url.set(drivername="postgresql+asyncpg")
-    clean_query = {k: v for k, v in url.query.items() if k not in {"sslmode", "channel_binding"}}
-    url = url.set(query=clean_query)
+
+    query = dict(url.query)
+    sslmode = query.get("sslmode")
+    channel_binding = query.get("channel_binding")
+
+    # Remove asyncpg-unsupported params from URL but keep their intent via connect_args
+    if "sslmode" in query or "channel_binding" in query:
+        query = {k: v for k, v in query.items() if k not in {"sslmode", "channel_binding"}}
+        url = url.set(query=query)
+
+    connect_args: dict = {}
+    if sslmode in {"require", "verify-full", "verify-ca", "prefer"}:
+        connect_args["ssl"] = True
+    elif sslmode == "disable":
+        connect_args["ssl"] = False
+    else:
+        # Default for Neon: require TLS even if sslmode not provided
+        connect_args["ssl"] = True
+
     logger.info(
-        "DB URL (masked): driver=%s host=%s db=%s user=%s",
+        "DB URL (masked): driver=%s host=%s db=%s user=%s sslmode=%s channel_binding=%s",
         url.drivername,
         url.host,
         url.database,
         url.username,
+        sslmode,
+        channel_binding,
     )
-    return url
+    return url, connect_args
 
+
+_url, _connect_args = _sanitize_database_url(settings.database_url)
 
 engine: AsyncEngine = create_async_engine(
-    str(_sanitize_database_url(settings.database_url)),
+    str(_url),
     future=True,
     echo=False,
-    connect_args={"ssl": True},  # Require TLS for Neon/PG when URL lacks ssl params
+    connect_args=_connect_args,
 )
 AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
 
