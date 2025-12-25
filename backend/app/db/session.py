@@ -14,6 +14,9 @@ class Base(DeclarativeBase):
 def _sanitize_database_url(raw_url: str) -> URL:
     """Drop ssl-related query params that asyncpg rejects; TLS enforced via connect_args."""
     url = make_url(raw_url)
+    # Force asyncpg driver when Postgres URL lacks it (Render/Neon often provide plain postgresql://)
+    if url.drivername in {"postgresql", "postgres", "postgresql+psycopg2"}:
+        url = url.set(drivername="postgresql+asyncpg")
     clean_query = {k: v for k, v in url.query.items() if k not in {"sslmode", "channel_binding"}}
     return url.set(query=clean_query)
 
