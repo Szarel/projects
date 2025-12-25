@@ -10,7 +10,12 @@ class Base(DeclarativeBase):
     """Declarative base for ORM models."""
 
 
-engine: AsyncEngine = create_async_engine(settings.database_url, future=True, echo=False)
+engine: AsyncEngine = create_async_engine(
+    settings.database_url,
+    future=True,
+    echo=False,
+    connect_args={"ssl": True},  # Require TLS for Neon/PG when URL lacks ssl params
+)
 AsyncSessionLocal = async_sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
 
 
