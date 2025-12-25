@@ -1,5 +1,6 @@
 from typing import AsyncIterator
 
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -10,8 +11,15 @@ class Base(DeclarativeBase):
     """Declarative base for ORM models."""
 
 
+def _sanitize_database_url(raw_url: str) -> URL:
+    """Drop ssl-related query params that asyncpg rejects; TLS enforced via connect_args."""
+    url = make_url(raw_url)
+    clean_query = {k: v for k, v in url.query.items() if k not in {"sslmode", "channel_binding"}}
+    return url.set(query=clean_query)
+
+
 engine: AsyncEngine = create_async_engine(
-    settings.database_url,
+    str(_sanitize_database_url(settings.database_url)),
     future=True,
     echo=False,
     connect_args={"ssl": True},  # Require TLS for Neon/PG when URL lacks ssl params
