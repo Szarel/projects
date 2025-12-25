@@ -45,6 +45,11 @@ def _sanitize_database_url(raw_url: str) -> tuple[URL, dict]:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             connect_args["ssl"] = ctx
+
+    # Supabase Transaction Pooler (PgBouncer) doesn't support prepared statements.
+    # asyncpg uses a statement cache (prepared statements) by default, so disable it.
+    if url.host and url.host.endswith("pooler.supabase.com"):
+        connect_args["statement_cache_size"] = 0
         elif effective_mode in {"verify-ca", "verify-full"}:
             ctx = ssl.create_default_context()
             ctx.check_hostname = effective_mode == "verify-full"
