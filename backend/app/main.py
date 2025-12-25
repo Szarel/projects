@@ -9,7 +9,7 @@ app = FastAPI(title="SIGAP API", version="0.1.0")
 # CORS abierto para desarrollo; ajustar en produccion
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
