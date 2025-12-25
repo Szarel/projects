@@ -1,0 +1,4 @@
+Alembic migration environment. Initialize versions with:
+
+alembic revision --autogenerate -m "init"
+alembic upgrade head
