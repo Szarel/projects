@@ -12,3 +12,5 @@ python-dotenv==1.0.0
 geoalchemy2==0.14.2
 python-jose==3.3.0
 passlib[bcrypt]==1.7.4
+# passlib 1.7.4 is not compatible with bcrypt 4.x
+bcrypt==3.2.2
