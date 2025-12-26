@@ -9,7 +9,10 @@ from app.core.config import settings
 def _client() -> OpenAI | None:
     if not settings.ai_api_key:
         return None
-    return OpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
+    try:
+        return OpenAI(api_key=settings.ai_api_key, base_url=settings.ai_base_url)
+    except Exception:
+        return None
 
 
 def extract_contract_fields(text: str) -> Dict[str, Any]:
