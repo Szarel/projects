@@ -425,11 +425,17 @@ async def upload_document(
         )
 
     if entidad_tipo == "propiedad" and categoria == "recibo":
+        if not settings.gemini_api_key:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="IA no configurada (falta GEMINI_API_KEY)")
+
+        if not (file.content_type or "").lower().startswith("image"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El archivo debe ser una imagen")
+
         parsed = extract_payment_from_image(content, file.content_type)
         prop = await session.get(Property, entity_uuid)
 
         if not parsed:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se pudo leer el comprobante")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se pudo leer el comprobante (IA)")
         if not prop:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Propiedad no existe")
 
