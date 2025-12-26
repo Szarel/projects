@@ -9,8 +9,8 @@ import {
   uploadDocument,
   fetchPropertyFull,
 } from "./api";
-import MapView from "./components/MapView";
 import Login from "./components/Login";
+import Dashboard from "./components/Dashboard";
 
 function App() {
   const [token, setTokenState] = useState<string | null>(() => getToken());
@@ -114,7 +114,10 @@ function App() {
     try {
       await uploadDocument(selectedProp, docFile, docCategoria);
     } catch (err: any) {
-      setError("No se pudo subir el documento");
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      const extra = detail ? `: ${typeof detail === "string" ? detail : JSON.stringify(detail)}` : "";
+      setError(`No se pudo subir el documento${status ? ` (${status})` : ""}${extra}`);
     } finally {
       setUploading(false);
       setDocFile(null);
@@ -215,41 +218,14 @@ function App() {
           </button>
         </div>
       </header>
-      <main className="content">
-        <section className="map-panel">
-          <MapView data={geojson} onSelect={handleSelectProperty} />
-        </section>
-        <section className="list-panel">
-          <div className="list-header">
-            <h2>Propiedades</h2>
-            <div className="actions">
-              <button onClick={handleDemoSeed} disabled={creating}>
-                {creating ? "Cargando..." : "Cargar demo"}
-              </button>
-            </div>
-          </div>
-          <div className="table">
-            <div className="table-head">
-              <span>Codigo</span>
-              <span>Direccion</span>
-              <span>Estado</span>
-              <span>Tipo</span>
-              <span>Comuna</span>
-            </div>
-            {properties.map((p) => (
-              <div key={p.id} className="table-row">
-                <span>{p.codigo}</span>
-                <span>{p.direccion_linea1}</span>
-                <span className={`badge ${p.estado_actual}`}>{p.estado_actual}</span>
-                <span>{p.tipo}</span>
-                <span>{p.comuna}</span>
-                <button className="link" onClick={() => handleSelectProperty(p.id)}>
-                  Ver ficha
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
+      <main className="dash-page">
+        <Dashboard
+          properties={properties}
+          geojson={geojson}
+          onSelectProperty={handleSelectProperty}
+          onDemoSeed={handleDemoSeed}
+          creating={creating}
+        />
       </main>
 
       {showModal && (
@@ -395,7 +371,11 @@ function App() {
                 </label>
                 <label>
                   Archivo
-                  <input type="file" onChange={(e) => setDocFile(e.target.files?.[0] || null)} />
+                  <input
+                    type="file"
+                    accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                    onChange={(e) => setDocFile(e.target.files?.[0] || null)}
+                  />
                 </label>
               </form>
             </div>

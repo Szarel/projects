@@ -84,7 +84,5 @@ export async function uploadDocument(
   formData.append("entidad_id", entidad_id);
   formData.append("categoria", categoria);
   formData.append("file", file);
-  await api.post("/documents", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
+  await api.post("/documents", formData);
 }

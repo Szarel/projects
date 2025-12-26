@@ -24,13 +24,13 @@ function iconFor(state: string) {
 
 type MapViewProps = { data: any; onSelect?: (id: string) => void };
 
-function MapView({ data, onSelect }: MapViewProps) {
+function MapView({ data, onSelect, className }: MapViewProps & { className?: string }) {
   const center = data.features?.length
     ? [data.features[0].geometry.coordinates[1], data.features[0].geometry.coordinates[0]]
     : [-33.45, -70.66];
 
   return (
-    <MapContainer center={center as any} zoom={12} className="map">
+    <MapContainer center={center as any} zoom={12} className={className ? `map ${className}` : "map"}>
       <TileLayer
         attribution="&copy; OpenStreetMap"
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
