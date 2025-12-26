@@ -98,16 +98,6 @@ async def _attach_contract_from_pdf(
     if not prop:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Property not found")
 
-    # Validate parties exist
-    # Ensure parties exist
-    for model, eid, message in (
-        (Person, arrendatario_id, "Tenant not found"),
-        (Person, propietario_id, "Owner not found"),
-    ):
-        obj = await session.get(model, eid)
-        if not obj:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
-
     start_date: date = parsed.get("fecha_inicio") or date.today()
     end_date: date = parsed.get("fecha_fin") or (start_date + timedelta(days=365))
     pay_day: int | None = parsed.get("dia_pago") or 5
