@@ -128,6 +128,37 @@ function App() {
     return { vencidos, porVencer, sinContrato, cobranzaAtrasada, docsIncompletos };
   };
 
+  const paymentsSummary = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    let monthTotal = 0;
+    let monthCount = 0;
+    let last: any = null;
+
+    for (const p of properties) {
+      const detail = detailsCache[p.id];
+      const charges = detail?.charges || [];
+      for (const c of charges) {
+        const pays = c.pagos || [];
+        for (const pay of pays) {
+          const dt = pay.fecha_pago ? new Date(pay.fecha_pago) : null;
+          const amount = typeof pay.monto_pagado === "number" ? pay.monto_pagado : Number(pay.monto_pagado || 0);
+          if (dt && dt.getFullYear() === year && dt.getMonth() === month) {
+            monthTotal += amount || 0;
+            monthCount += 1;
+          }
+          const lastDate = last?.fecha_pago ? new Date(last.fecha_pago) : null;
+          if (!lastDate || (dt && dt > lastDate)) {
+            last = { ...pay, propertyCodigo: p.codigo };
+          }
+        }
+      }
+    }
+
+    return { monthTotal, monthCount, last };
+  }, [properties, detailsCache]);
+
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 2200);
@@ -541,6 +572,7 @@ function App() {
           filters={filters}
           onChangeFilters={setFilters}
           alertsData={alertsData}
+          paymentsSummary={paymentsSummary}
           showFilters={showFilters}
         />
       </main>

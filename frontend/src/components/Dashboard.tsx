@@ -11,6 +11,7 @@ type DashboardProps = {
   filters: { estado: string; tipo: string; comuna: string };
   onChangeFilters: (f: { estado: string; tipo: string; comuna: string }) => void;
   alertsData: { vencidos: number; porVencer: number; sinContrato: number; cobranzaAtrasada: number; docsIncompletos: number };
+  paymentsSummary: { monthTotal: number; monthCount: number; last: any };
   showFilters: boolean;
 };
 
@@ -169,7 +170,7 @@ function DashCard({
   );
 }
 
-export default function Dashboard({ properties, fullProperties, geojson, onSelectProperty, onDeleteProperty, filters, onChangeFilters, alertsData, showFilters }: DashboardProps) {
+export default function Dashboard({ properties, fullProperties, geojson, onSelectProperty, onDeleteProperty, filters, onChangeFilters, alertsData, paymentsSummary, showFilters }: DashboardProps) {
   const [expanded, setExpanded] = useState<CardId | null>(null);
 
   const estados = [
@@ -188,7 +189,9 @@ export default function Dashboard({ properties, fullProperties, geojson, onSelec
     const arriendos = properties
       .map((p) => (typeof p.valor_arriendo === "number" ? p.valor_arriendo : null))
       .filter((n): n is number => n !== null);
-    const ingresos = arriendos.reduce((a, b) => a + b, 0);
+    const ingresosPagados = paymentsSummary.monthTotal || 0;
+    const ingresosFallback = arriendos.reduce((a, b) => a + b, 0);
+    const ingresos = ingresosPagados || ingresosFallback;
     const gastos = Math.round(ingresos * 0.12);
     const comision = Math.round(ingresos * 0.08);
     const flujo = ingresos - gastos - comision;
@@ -197,9 +200,23 @@ export default function Dashboard({ properties, fullProperties, geojson, onSelec
       gastos,
       comision,
       flujo,
+      ingresos_pagados: ingresosPagados,
       variacion: properties.length ? Math.max(-25, Math.min(25, Math.round((properties.length % 7) * 3 - 10))) : 0,
     };
-  }, [properties]);
+  }, [properties, paymentsSummary]);
+
+  const lastReceiptLabel = useMemo(() => {
+    const last = paymentsSummary.last;
+    if (!last) return "Sin pagos registrados";
+    const date = last.fecha_pago ? new Date(last.fecha_pago) : null;
+    const dateLabel = date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString("es-CL") : "fecha s/d";
+    const amount = typeof last.monto_pagado === "number" ? last.monto_pagado : Number(last.monto_pagado || 0);
+    const amtLabel = amount ? formatMoney(amount) : "monto s/d";
+    const medio = last.medio_pago || "medio s/d";
+    const ref = last.referencia || "ref s/d";
+    const prop = last.propertyCodigo ? ` · ${last.propertyCodigo}` : "";
+    return `${amtLabel} · ${medio} · ${ref} · ${dateLabel}${prop}`;
+  }, [paymentsSummary]);
 
   const byStatus = useMemo(
     () => groupCount(properties.map((p) => String(p.estado_actual ?? ""))),
@@ -307,6 +324,9 @@ export default function Dashboard({ properties, fullProperties, geojson, onSelec
             <div className="kpi">
               <div className="kpi-label">Ingresos del mes</div>
               <div className="kpi-value">{kpis.ingresos ? formatMoney(kpis.ingresos) : "-"}</div>
+              {paymentsSummary.monthCount > 0 && (
+                <div className="kpi-pill pos">{paymentsSummary.monthCount} pago(s)</div>
+              )}
             </div>
             <div className="kpi">
               <div className="kpi-label">Gastos</div>
@@ -325,6 +345,7 @@ export default function Dashboard({ properties, fullProperties, geojson, onSelec
               </div>
             </div>
           </div>
+          <div className="kpi-note">{lastReceiptLabel}</div>
           </section>
           <DashCard id="map" title="Mapa" onExpand={setExpanded}>
             <MapView data={geojson} onSelect={onSelectProperty} className="dash-map" />

@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from PyPDF2 import PdfReader
@@ -18,6 +18,7 @@ from app.api.deps import get_current_user, require_roles
 from app.core.config import settings
 from app.db.session import get_session
 from app.models.contract import AdjustmentType, ContractStatus, Currency, LeaseContract
+from app.models.charge import Charge, ChargeState, PaymentDetail
 from app.models.document import Document
 from app.models.person import Person, PersonType
 from app.models.property import Property, PropertyState
@@ -422,6 +423,79 @@ async def upload_document(
             parsed=parsed,
             current_user_id=current_user.id,
         )
+
+    if entidad_tipo == "propiedad" and categoria == "recibo":
+        parsed = extract_payment_from_image(content, file.content_type)
+        prop = await session.get(Property, entity_uuid)
+
+        if parsed and prop:
+            try:
+                amount = Decimal(str(parsed.get("monto_pagado")))
+            except Exception:
+                amount = None
+
+            if amount:
+                raw_date = parsed.get("fecha_pago")
+                try:
+                    pay_date = datetime.fromisoformat(str(raw_date)).date() if raw_date else date.today()
+                except Exception:
+                    pay_date = date.today()
+
+                medio = parsed.get("medio_pago")
+                referencia = parsed.get("referencia")
+
+                contract_q = await session.execute(
+                    select(LeaseContract)
+                    .where(LeaseContract.propiedad_id == entity_uuid, LeaseContract.estado == ContractStatus.VIGENTE)
+                    .order_by(LeaseContract.fecha_inicio.desc())
+                    .limit(1)
+                )
+                contract = contract_q.scalars().first()
+
+                if contract:
+                    periodo = date(pay_date.year, pay_date.month, 1)
+                    charge_q = await session.execute(
+                        select(Charge).where(Charge.contrato_id == contract.id, Charge.periodo == periodo).limit(1)
+                    )
+                    charge = charge_q.scalars().first()
+
+                    if not charge:
+                        charge = Charge(
+                            contrato_id=contract.id,
+                            periodo=periodo,
+                            monto_original=amount,
+                            monto_ajustado=None,
+                            fecha_vencimiento=pay_date,
+                            estado=ChargeState.PENDIENTE,
+                        )
+                        session.add(charge)
+                        await session.flush()
+
+                    payment = PaymentDetail(
+                        cobranza_id=charge.id,
+                        monto_pagado=amount,
+                        fecha_pago=pay_date,
+                        medio_pago=medio,
+                        referencia=referencia,
+                    )
+                    session.add(payment)
+                    await session.flush()
+
+                    total_pagado_result = await session.execute(
+                        select(func.coalesce(func.sum(PaymentDetail.monto_pagado), 0)).where(
+                            PaymentDetail.cobranza_id == charge.id
+                        )
+                    )
+                    total_pagado: Decimal = total_pagado_result.scalar() or Decimal("0")
+                    monto_objetivo = charge.monto_ajustado or charge.monto_original
+
+                    if total_pagado >= monto_objetivo:
+                        charge.estado = ChargeState.PAGADO
+                        charge.fecha_pago = payment.fecha_pago
+                    elif total_pagado > 0:
+                        charge.estado = ChargeState.PARCIAL
+                    else:
+                        charge.estado = ChargeState.PENDIENTE
 
     await session.commit()
     await session.refresh(document)
