@@ -57,14 +57,11 @@ def _sanitize_database_url(raw_url: str) -> tuple[URL, dict]:
             ctx.verify_mode = ssl.CERT_NONE
             connect_args["ssl"] = ctx
 
-    # PgBouncer/Poolers: avoid prepared statements by default to prevent DuplicatePreparedStatementError.
-    # Applies broadly (safe default):
-    # - asyncpg connect arg statement_cache_size=0
-    # - SQLAlchemy asyncpg dialect prepared_statement_cache_size=0 via URL
+    # PgBouncer/Poolers: avoid prepared statements to prevent DuplicatePreparedStatementError.
+    # Force both caches to zero on every connection.
     query = dict(url.query)
     connect_args["statement_cache_size"] = 0
-    if query.get("prepared_statement_cache_size") is None:
-        query["prepared_statement_cache_size"] = "0"
+    query["prepared_statement_cache_size"] = "0"
     url = url.set(query=query)
 
     logger.info(
