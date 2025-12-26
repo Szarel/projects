@@ -76,13 +76,10 @@ async def download_document(
     current_user: User = Depends(get_current_user),
 ):
     document = await session.get(Document, document_id)
-    if not document or not document.activo:
+    if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     path = Path(document.storage_path)
     if not path.exists():
-        # Mark as inactive to avoid repeated 410s.
-        document.activo = False
-        await session.commit()
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="File missing; reemplace o cargue nuevamente")
     return FileResponse(path, filename=document.filename)
 
@@ -94,7 +91,7 @@ async def delete_document(
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.CORREDOR, UserRole.FINANZAS)),
 ):
     document = await session.get(Document, document_id)
-    if not document or not document.activo:
+    if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
     document.activo = False
@@ -121,7 +118,7 @@ async def replace_document(
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.CORREDOR, UserRole.FINANZAS)),
 ) -> DocumentRead:
     document = await session.get(Document, document_id)
-    if not document or not document.activo:
+    if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
     storage_root = Path(settings.storage_dir)
@@ -137,6 +134,7 @@ async def replace_document(
     document.filename = file.filename
     document.storage_path = str(storage_path)
     document.version = (document.version or 1) + 1
+    document.activo = True
     if categoria:
         document.categoria = categoria
 

@@ -57,14 +57,15 @@ def _sanitize_database_url(raw_url: str) -> tuple[URL, dict]:
             ctx.verify_mode = ssl.CERT_NONE
             connect_args["ssl"] = ctx
 
-    # Supabase Transaction Pooler (PgBouncer) doesn't support prepared statements.
-    # - Disable asyncpg's statement cache.
-    # - Disable SQLAlchemy asyncpg dialect's prepared statement cache via URL query.
-    if url.host and url.host.endswith("pooler.supabase.com"):
-        connect_args["statement_cache_size"] = 0
-        query = dict(url.query)
+    # PgBouncer/Poolers: avoid prepared statements by default to prevent DuplicatePreparedStatementError.
+    # Applies broadly (safe default):
+    # - asyncpg connect arg statement_cache_size=0
+    # - SQLAlchemy asyncpg dialect prepared_statement_cache_size=0 via URL
+    query = dict(url.query)
+    connect_args["statement_cache_size"] = 0
+    if query.get("prepared_statement_cache_size") is None:
         query["prepared_statement_cache_size"] = "0"
-        url = url.set(query=query)
+    url = url.set(query=query)
 
     logger.info(
         "DB URL (masked): driver=%s host=%s db=%s user=%s sslmode=%s channel_binding=%s",
