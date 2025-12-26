@@ -33,10 +33,13 @@ def extract_contract_fields(text: str) -> Dict[str, Any]:
         return {}
 
     prompt = (
-        "Eres un extractor de datos de contratos de arriendo en Chile. Devuelve un JSON compacto con campos "
+        "Eres un extractor de contratos de arriendo en Chile. Devuelve SOLO JSON con estas claves exactas: "
         "arrendatario_nombre, arrendatario_rut, propietario_nombre, propietario_rut, fecha_inicio (YYYY-MM-DD), "
-        "fecha_fin (YYYY-MM-DD), dia_pago (1-31), renta_mensual (numero), moneda (CLP/UF), direccion. "
-        "Si no sabes un campo, deja null. Solo devuelve JSON sin texto adicional."
+        "fecha_fin (YYYY-MM-DD), dia_pago (1-31), renta_mensual (numero, en CLP), moneda (CLP o UF), direccion. "
+        "Reglas: 1) No inventes datos; si no esta, usa null. 2) Formato fecha ISO YYYY-MM-DD. 3) Si hay rango, usa inicio mas temprano y fin mas tardio del contrato. "
+        "4) Dia de pago: si dice 'primeros dias habiles' o similar, usa 5. 5) renta_mensual: toma el monto principal de arriendo (el mayor si hay varios) en CLP, sin puntos ni simbolos. "
+        "6) RUT: usa el que aparezca (formato 9.999.999-9); no generes uno. 7) direccion: texto breve de direccion del inmueble. "
+        "Devuelve un JSON plano sin texto adicional ni backticks."
     )
 
     try:
