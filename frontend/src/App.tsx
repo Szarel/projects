@@ -624,7 +624,7 @@ function App() {
                 {docCategoria === "contrato_arriendo" && (
                   <>
                     <label>
-                      Arrendatario (UUID)
+                      Arrendatario (RUT o UUID)
                       <input
                         value={arrendatarioId}
                         onChange={(e) => setArrendatarioId(e.target.value)}
@@ -633,7 +633,7 @@ function App() {
                       />
                     </label>
                     <label>
-                      Propietario (UUID)
+                      Propietario (RUT o UUID)
                       <input
                         value={propietarioId}
                         onChange={(e) => setPropietarioId(e.target.value)}

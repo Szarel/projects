@@ -181,12 +181,29 @@ async def upload_document(
     if entidad_tipo == "propiedad" and categoria == "contrato_arriendo":
         if not arrendatario_id or not propietario_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="arrendatario_id y propietario_id son requeridos para contratos de arriendo")
+
+        async def _resolve_person(raw: str, role: str) -> uuid.UUID:
+            """Accept UUID or RUT; returns person UUID or raises 404."""
+            cleaned = raw.strip()
+            try:
+                return uuid.UUID(cleaned)
+            except Exception:
+                # Try lookup by RUT
+                result = await session.execute(select(Person).where(Person.rut == cleaned))
+                person = result.scalars().first()
+                if not person:
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{role} not found (usa UUID o RUT válido)")
+                return person.id
+
+        arr_id = await _resolve_person(arrendatario_id, "Tenant")
+        prop_id = await _resolve_person(propietario_id, "Owner")
+
         parsed = _parse_contract_pdf(content)
         await _attach_contract_from_pdf(
             session=session,
             property_id=entity_uuid,
-            arrendatario_id=uuid.UUID(arrendatario_id),
-            propietario_id=uuid.UUID(propietario_id),
+            arrendatario_id=arr_id,
+            propietario_id=prop_id,
             parsed=parsed,
             current_user_id=current_user.id,
         )
