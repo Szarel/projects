@@ -321,14 +321,6 @@ function App() {
     setUploading(true);
     setError(null);
     try {
-      if (docCategoria === "contrato_arriendo") {
-        if (!arrendatarioId || !propietarioId) {
-          setError("Debes indicar arrendatario y propietario para el contrato");
-          setUploading(false);
-          return;
-        }
-      }
-
       await uploadDocument(selectedProp, docFile, docCategoria, "propiedad", {
         arrendatario_id: arrendatarioId || undefined,
         propietario_id: propietarioId || undefined,
@@ -624,24 +616,22 @@ function App() {
                 {docCategoria === "contrato_arriendo" && (
                   <>
                     <label>
-                      Arrendatario (RUT o UUID)
+                      Arrendatario (RUT o UUID, opcional)
                       <input
                         value={arrendatarioId}
                         onChange={(e) => setArrendatarioId(e.target.value)}
-                        placeholder="ID de arrendatario"
-                        required
+                        placeholder="Si lo dejas vacío, se intentará leer del PDF"
                       />
                     </label>
                     <label>
-                      Propietario (RUT o UUID)
+                      Propietario (RUT o UUID, opcional)
                       <input
                         value={propietarioId}
                         onChange={(e) => setPropietarioId(e.target.value)}
-                        placeholder="ID de propietario"
-                        required
+                        placeholder="Si lo dejas vacío, se intentará leer del PDF"
                       />
                     </label>
-                    <p className="muted">Si la propiedad ya tiene contrato, prellenamos los IDs; puedes reemplazarlos.</p>
+                    <p className="muted">Si ya tiene contrato, prellenamos; si lo dejas vacío, la IA/creación automática se encargará.</p>
                   </>
                 )}
                 <label>

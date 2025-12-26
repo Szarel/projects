@@ -196,8 +196,6 @@ async def upload_document(
     session.add(document)
 
     if entidad_tipo == "propiedad" and categoria == "contrato_arriendo":
-        if not arrendatario_id or not propietario_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="arrendatario_id y propietario_id son requeridos para contratos de arriendo")
 
         async def _resolve_person(raw: str, role: str, fallback_rut: str | None, fallback_name: str | None) -> uuid.UUID:
             """Accept UUID or RUT; if not found, creates a Person for tests."""
@@ -254,8 +252,8 @@ async def upload_document(
             return new_person.id
 
         parsed = _parse_contract_pdf(content)
-        arr_id = await _resolve_person(arrendatario_id, "Tenant", parsed.get("arrendatario_rut"), parsed.get("arrendatario_nombre"))
-        prop_id = await _resolve_person(propietario_id, "Owner", parsed.get("propietario_rut"), parsed.get("propietario_nombre"))
+        arr_id = await _resolve_person(arrendatario_id or "", "Tenant", parsed.get("arrendatario_rut"), parsed.get("arrendatario_nombre"))
+        prop_id = await _resolve_person(propietario_id or "", "Owner", parsed.get("propietario_rut"), parsed.get("propietario_nombre"))
 
         await _attach_contract_from_pdf(
             session=session,
