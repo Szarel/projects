@@ -25,7 +25,7 @@ from app.models.property import Property, PropertyState
 from app.models.property_state import PropertyStateHistory
 from app.schemas.document import DocumentCreate, DocumentRead
 from app.models.user import User, UserRole
-from app.services.ai_extract import extract_contract_fields
+from app.services.ai_extract import extract_contract_fields, extract_payment_from_image
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
