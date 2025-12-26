@@ -87,6 +87,10 @@ export async function createProperty(payload: Omit<Property, "id">): Promise<Pro
   return data;
 }
 
+export async function deleteProperty(propertyId: string): Promise<void> {
+  await api.delete(`/properties/${propertyId}`);
+}
+
 export async function downloadDocument(documentId: string): Promise<Blob> {
   const { data } = await api.get(`/documents/${documentId}/download`, { responseType: "blob" });
   return data as Blob;

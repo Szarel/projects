@@ -337,3 +337,15 @@ async def update_property(
     await session.commit()
     await session.refresh(prop)
     return prop
+
+
+@router.delete("/{property_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_property(
+    property_id: UUID,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.CORREDOR)),
+) -> None:
+    prop = await _get_property_or_404(property_id, session)
+    await session.delete(prop)
+    await session.commit()
+    return None

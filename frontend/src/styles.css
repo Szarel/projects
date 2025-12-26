@@ -89,6 +89,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .forms .card { width: 100%; box-shadow: none; padding: 1.25rem; }
 .form-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.grid .full { grid-column: 1 / -1; }
 .card select { padding: 0.75rem 0.85rem; border-radius: 8px; border: 1px solid var(--border); background: #0b1220; color: var(--text); }
 .card h3 { margin: 0; }
 .card button[type="submit"] { align-self: flex-start; }
@@ -185,7 +186,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 .dash-table-head, .dash-table-row { min-width: 560px; }
 .dash-table-head {
   display: grid;
-  grid-template-columns: 1fr 2fr 1fr 1fr;
+  grid-template-columns: 1fr 2fr 1fr 1fr auto;
   gap: 0.5rem;
   align-items: center;
   padding: 0.35rem 0;
@@ -195,7 +196,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 }
 
 .dash-table.expanded .dash-table-head {
-  grid-template-columns: 1fr 2fr 1fr 1fr 1fr;
+  grid-template-columns: 1fr 2fr 1fr 1fr 1fr auto;
 }
 
 .dash-table-row {
@@ -207,13 +208,23 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
   color: var(--text);
   cursor: pointer;
   display: grid;
-  grid-template-columns: 1fr 2fr 1fr 1fr;
+  grid-template-columns: 1fr 2fr 1fr 1fr auto;
   gap: 0.5rem;
   align-items: center;
   padding: 0.45rem 0;
 }
 
-.dash-table.expanded .dash-table-row { grid-template-columns: 1fr 2fr 1fr 1fr 1fr; }
+.dash-table.expanded .dash-table-row { grid-template-columns: 1fr 2fr 1fr 1fr 1fr auto; }
+
+.dash-delete {
+  border: 1px solid var(--border);
+  background: #1f2937;
+  color: #f87171;
+  border-radius: 6px;
+  padding: 0.25rem 0.45rem;
+  cursor: pointer;
+}
+.dash-delete:hover { background: #2c3650; }
 
 .dash-table-row span:nth-child(2) {
   overflow: hidden;

@@ -8,6 +8,7 @@ type DashboardProps = {
   onSelectProperty: (id: string) => void;
   onDemoSeed: () => void;
   creating: boolean;
+  onDeleteProperty: (id: string) => void;
 };
 
 type CardId =
@@ -151,7 +152,7 @@ function DashCard({
   );
 }
 
-export default function Dashboard({ properties, geojson, onSelectProperty, onDemoSeed, creating }: DashboardProps) {
+export default function Dashboard({ properties, geojson, onSelectProperty, onDemoSeed, creating, onDeleteProperty }: DashboardProps) {
   const [expanded, setExpanded] = useState<CardId | null>(null);
 
   const byStatus = useMemo(
@@ -226,20 +227,26 @@ export default function Dashboard({ properties, geojson, onSelectProperty, onDem
               <span>Código</span>
               <span>Dirección</span>
               <span>Estado</span>
-              <span>Comuna</span>
+                <span>Comuna</span>
+                <span></span>
             </div>
             {properties.slice(0, 8).map((p) => (
-              <button
-                key={p.id}
-                className="dash-table-row"
-                type="button"
-                onClick={() => onSelectProperty(p.id)}
-              >
+              <div key={p.id} className="dash-table-row" onClick={() => onSelectProperty(p.id)} role="button" tabIndex={0}>
                 <span>{p.codigo}</span>
                 <span title={p.direccion_linea1}>{p.direccion_linea1}</span>
                 <span className={`badge ${p.estado_actual}`}>{p.estado_actual}</span>
                 <span>{p.comuna}</span>
-              </button>
+                <button
+                  type="button"
+                  className="dash-delete"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onDeleteProperty(p.id);
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
             ))}
             {properties.length > 8 && <div className="dash-hint">Expandir para ver todas</div>}
           </div>
@@ -298,20 +305,32 @@ export default function Dashboard({ properties, geojson, onSelectProperty, onDem
                   <span>Estado</span>
                   <span>Tipo</span>
                   <span>Comuna</span>
+                  <span></span>
                 </div>
                 {properties.map((p) => (
-                  <button
+                  <div
                     key={p.id}
                     className="dash-table-row"
-                    type="button"
                     onClick={() => onSelectProperty(p.id)}
+                    role="button"
+                    tabIndex={0}
                   >
                     <span>{p.codigo}</span>
                     <span>{p.direccion_linea1}</span>
                     <span className={`badge ${p.estado_actual}`}>{p.estado_actual}</span>
                     <span>{p.tipo}</span>
                     <span>{p.comuna}</span>
-                  </button>
+                    <button
+                      type="button"
+                      className="dash-delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onDeleteProperty(p.id);
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
                 ))}
               </div>
             )}

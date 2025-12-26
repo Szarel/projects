@@ -6,6 +6,7 @@ import {
   getToken,
   setToken,
   createProperty,
+  deleteProperty,
   uploadDocument,
   fetchPropertyFull,
   downloadDocument,
@@ -25,17 +26,9 @@ function App() {
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [newProp, setNewProp] = useState({
-    codigo: "",
     direccion_linea1: "",
-    comuna: "",
-    region: "",
     tipo: "casa",
-    estado_actual: "disponible",
-    valor_arriendo: undefined as number | undefined,
-    valor_venta: undefined as number | undefined,
-    fecha_publicacion: "",
-    lat: undefined as number | undefined,
-    lon: undefined as number | undefined,
+    codigo: "",
   });
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docCategoria, setDocCategoria] = useState("escritura");
@@ -46,6 +39,32 @@ function App() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
   const [detailsCache, setDetailsCache] = useState<Record<string, any>>({});
+  const defaultLat = -33.45;
+  const defaultLon = -70.66;
+
+  async function geocodeAddress(address: string): Promise<{
+    lat: number;
+    lon: number;
+    comuna?: string;
+    region?: string;
+  } | null> {
+    if (!address.trim()) return null;
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=1&q=${encodeURIComponent(address + ", Chile")}`;
+      const resp = await fetch(url, { headers: { Accept: "application/json" } });
+      if (!resp.ok) return null;
+      const data = await resp.json();
+      if (!data?.length) return null;
+      const item = data[0];
+      const lat = parseFloat(item.lat);
+      const lon = parseFloat(item.lon);
+      const comuna = item.address?.city || item.address?.town || item.address?.village || item.address?.county;
+      const region = item.address?.state;
+      return { lat, lon, comuna, region };
+    } catch {
+      return null;
+    }
+  }
 
   async function prefetchDetails(props: Property[]) {
     if (!props.length) return;
@@ -109,19 +128,32 @@ function App() {
     setCreating(true);
     setError(null);
     try {
+      if (!newProp.direccion_linea1.trim()) {
+        setError("Ingresa una dirección");
+        return;
+      }
+
+      const geo = await geocodeAddress(newProp.direccion_linea1);
+      const generatedCode = newProp.codigo?.trim() || `PRP-${Date.now()}`;
       const payload = {
-        ...newProp,
-        valor_arriendo: newProp.valor_arriendo || undefined,
-        valor_venta: newProp.valor_venta || undefined,
-        fecha_publicacion: newProp.fecha_publicacion || undefined,
-        lat: newProp.lat || undefined,
-        lon: newProp.lon || undefined,
+        codigo: generatedCode,
+        direccion_linea1: newProp.direccion_linea1,
+        comuna: geo?.comuna || "Sin comuna",
+        region: geo?.region || "Sin región",
+        tipo: newProp.tipo,
+        estado_actual: "disponible",
+        valor_arriendo: undefined,
+        valor_venta: undefined,
+        fecha_publicacion: undefined,
+        lat: geo?.lat ?? defaultLat,
+        lon: geo?.lon ?? defaultLon,
       } as any;
       const created = await createProperty(payload);
       setProperties((prev) => [created, ...prev]);
       const refreshedGeo = await fetchGeoJson();
       setGeojson(refreshedGeo);
       setSelectedProp(created.id);
+      setNewProp({ direccion_linea1: "", tipo: "casa", codigo: "" });
     } catch (err: any) {
       setError("No se pudo crear la propiedad");
     } finally {
@@ -225,6 +257,27 @@ function App() {
     }
   };
 
+  const handleDeleteProperty = async (id: string) => {
+    if (!confirm("¿Eliminar esta propiedad?")) return;
+    setError(null);
+    try {
+      await deleteProperty(id);
+      setProperties((prev) => prev.filter((p) => p.id !== id));
+      const refreshedGeo = await fetchGeoJson();
+      setGeojson(refreshedGeo);
+      if (detailId === id) {
+        setShowDetail(false);
+        setDetail(null);
+        setDetailId(null);
+      }
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      const extra = detail ? `: ${typeof detail === "string" ? detail : JSON.stringify(detail)}` : "";
+      setError(`No se pudo eliminar la propiedad${status ? ` (${status})` : ""}${extra}`);
+    }
+  };
+
   const handleDemoSeed = async () => {
     if (!token) return;
     setCreating(true);
@@ -317,6 +370,7 @@ function App() {
           onSelectProperty={handleSelectProperty}
           onDemoSeed={handleDemoSeed}
           creating={creating}
+          onDeleteProperty={handleDeleteProperty}
         />
       </main>
 
@@ -338,25 +392,13 @@ function App() {
                   </button>
                 </div>
                 <div className="grid">
-                  <label>
-                    Código
-                    <input value={newProp.codigo} onChange={(e) => setNewProp({ ...newProp, codigo: e.target.value })} required />
-                  </label>
-                  <label>
-                    Dirección
+                  <label className="full">
+                    Dirección (se geolocaliza automáticamente)
                     <input
                       value={newProp.direccion_linea1}
                       onChange={(e) => setNewProp({ ...newProp, direccion_linea1: e.target.value })}
                       required
                     />
-                  </label>
-                  <label>
-                    Comuna
-                    <input value={newProp.comuna} onChange={(e) => setNewProp({ ...newProp, comuna: e.target.value })} required />
-                  </label>
-                  <label>
-                    Región
-                    <input value={newProp.region} onChange={(e) => setNewProp({ ...newProp, region: e.target.value })} required />
                   </label>
                   <label>
                     Tipo
@@ -368,69 +410,8 @@ function App() {
                       <option value="terreno">Terreno</option>
                     </select>
                   </label>
-                  <label>
-                    Estado
-                    <select
-                      value={newProp.estado_actual}
-                      onChange={(e) => setNewProp({ ...newProp, estado_actual: e.target.value })}
-                    >
-                      <option value="disponible">Disponible</option>
-                      <option value="arrendada">Arrendada</option>
-                      <option value="en_venta">En venta</option>
-                      <option value="vendida">Vendida</option>
-                      <option value="desocupada">Desocupada</option>
-                      <option value="mantencion">Mantención</option>
-                      <option value="litigio">Litigio</option>
-                      <option value="inactiva">Inactiva</option>
-                    </select>
-                  </label>
-                  <label>
-                    Valor arriendo
-                    <input
-                      type="number"
-                      value={newProp.valor_arriendo ?? ""}
-                      onChange={(e) =>
-                        setNewProp({ ...newProp, valor_arriendo: e.target.value ? Number(e.target.value) : undefined })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Valor venta
-                    <input
-                      type="number"
-                      value={newProp.valor_venta ?? ""}
-                      onChange={(e) =>
-                        setNewProp({ ...newProp, valor_venta: e.target.value ? Number(e.target.value) : undefined })
-                      }
-                    />
-                  </label>
-                  <label>
-                    Fecha publicación
-                    <input
-                      type="date"
-                      value={newProp.fecha_publicacion}
-                      onChange={(e) => setNewProp({ ...newProp, fecha_publicacion: e.target.value })}
-                    />
-                  </label>
-                  <label>
-                    Lat
-                    <input
-                      type="number"
-                      step="0.000001"
-                      value={newProp.lat ?? ""}
-                      onChange={(e) => setNewProp({ ...newProp, lat: e.target.value ? Number(e.target.value) : undefined })}
-                    />
-                  </label>
-                  <label>
-                    Lon
-                    <input
-                      type="number"
-                      step="0.000001"
-                      value={newProp.lon ?? ""}
-                      onChange={(e) => setNewProp({ ...newProp, lon: e.target.value ? Number(e.target.value) : undefined })}
-                    />
-                  </label>
                 </div>
+                <p className="muted">Usaremos la dirección para obtener coordenadas y ponerla en el mapa automáticamente.</p>
               </form>
 
               <form className="card" onSubmit={handleUploadDoc}>
