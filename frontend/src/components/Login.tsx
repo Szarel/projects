@@ -160,11 +160,6 @@ export default function Login({ onSuccess }: Props) {
         </button>
         {googleClientId && <div className="google-sep">o continúa con</div>}
         {googleClientId && <div ref={googleBtnRef} className="google-btn-slot" />}
-        {googleClientId && (
-          <button type="button" className="google-manual" onClick={handleGoogleClick}>
-            Continuar con Google
-          </button>
-        )}
       </form>
     </div>
   );
