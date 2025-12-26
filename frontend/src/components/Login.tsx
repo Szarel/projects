@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { login, loginWithGoogle } from "../api";
+import { login, loginWithGoogle, signup } from "../api";
 
 type Props = {
   onSuccess: (token: string) => void;
@@ -14,8 +14,10 @@ declare global {
 export default function Login({ onSuccess }: Props) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"login" | "signup">("login");
   const googleBtnRef = useRef<HTMLDivElement | null>(null);
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined;
 
@@ -71,11 +73,21 @@ export default function Login({ onSuccess }: Props) {
     setError(null);
     setLoading(true);
     try {
-      const token = await login(email, password);
-      onSuccess(token);
+      if (mode === "signup") {
+        await signup(email, password, fullName || undefined);
+        const token = await login(email, password);
+        onSuccess(token);
+      } else {
+        const token = await login(email, password);
+        onSuccess(token);
+      }
     } catch (err: any) {
       const status = err?.response?.status;
-      setError(status === 401 ? "Credenciales inválidas" : "Error al iniciar sesión");
+      if (mode === "signup") {
+        setError(status === 400 ? "Correo ya registrado" : "Error al registrar");
+      } else {
+        setError(status === 401 ? "Credenciales inválidas" : "Error al iniciar sesión");
+      }
     } finally {
       setLoading(false);
     }
@@ -84,7 +96,34 @@ export default function Login({ onSuccess }: Props) {
   return (
     <div className="auth-wrapper">
       <form className="card" onSubmit={handleSubmit}>
-        <h2>Ingresar a SIGAP</h2>
+        <div className="auth-tabs">
+          <button
+            type="button"
+            className={mode === "login" ? "auth-tab active" : "auth-tab"}
+            onClick={() => setMode("login")}
+          >
+            Ingresar
+          </button>
+          <button
+            type="button"
+            className={mode === "signup" ? "auth-tab active" : "auth-tab"}
+            onClick={() => setMode("signup")}
+          >
+            Registrarse
+          </button>
+        </div>
+        <h2>{mode === "login" ? "Ingresar a SIGAP" : "Crear cuenta"}</h2>
+        {mode === "signup" && (
+          <label>
+            Nombre
+            <input
+              type="text"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Tu nombre"
+            />
+          </label>
+        )}
         <label>
           Correo
           <input
@@ -107,7 +146,7 @@ export default function Login({ onSuccess }: Props) {
         </label>
         {error && <div className="error-msg">{error}</div>}
         <button type="submit" disabled={loading}>
-          {loading ? "Validando..." : "Ingresar"}
+          {loading ? (mode === "login" ? "Validando..." : "Creando...") : mode === "login" ? "Ingresar" : "Crear cuenta"}
         </button>
         {googleClientId && <div className="google-sep">o continúa con</div>}
         {googleClientId && <div ref={googleBtnRef} className="google-btn-slot" />}
