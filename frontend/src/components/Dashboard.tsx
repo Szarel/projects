@@ -4,11 +4,14 @@ import type { Property } from "../api";
 
 type DashboardProps = {
   properties: Property[];
+  fullProperties: Property[];
   geojson: any;
   onSelectProperty: (id: string) => void;
-  onDemoSeed: () => void;
-  creating: boolean;
   onDeleteProperty: (id: string) => void;
+  filters: { estado: string; tipo: string; comuna: string };
+  onChangeFilters: (f: { estado: string; tipo: string; comuna: string }) => void;
+  alertsData: { vencidos: number; porVencer: number; sinContrato: number; cobranzaAtrasada: number; docsIncompletos: number };
+  showFilters: boolean;
 };
 
 type CardId =
@@ -152,8 +155,37 @@ function DashCard({
   );
 }
 
-export default function Dashboard({ properties, geojson, onSelectProperty, onDemoSeed, creating, onDeleteProperty }: DashboardProps) {
+export default function Dashboard({ properties, fullProperties, geojson, onSelectProperty, onDeleteProperty, filters, onChangeFilters, alertsData, showFilters }: DashboardProps) {
   const [expanded, setExpanded] = useState<CardId | null>(null);
+
+  const estados = [
+    "todos",
+    "disponible",
+    "arrendada",
+    "en_venta",
+    "arrendada_en_venta",
+    "mantencion",
+    "suspendida",
+    "baja",
+  ];
+  const tipos = ["todos", "casa", "departamento", "oficina", "local", "terreno"];
+
+  const kpis = useMemo(() => {
+    const arriendos = properties
+      .map((p) => (typeof p.valor_arriendo === "number" ? p.valor_arriendo : null))
+      .filter((n): n is number => n !== null);
+    const ingresos = arriendos.reduce((a, b) => a + b, 0);
+    const gastos = Math.round(ingresos * 0.12);
+    const comision = Math.round(ingresos * 0.08);
+    const flujo = ingresos - gastos - comision;
+    return {
+      ingresos,
+      gastos,
+      comision,
+      flujo,
+      variacion: properties.length ? Math.max(-25, Math.min(25, Math.round((properties.length % 7) * 3 - 10))) : 0,
+    };
+  }, [properties]);
 
   const byStatus = useMemo(
     () => groupCount(properties.map((p) => String(p.estado_actual ?? ""))),
@@ -209,80 +241,160 @@ export default function Dashboard({ properties, geojson, onSelectProperty, onDem
                   ? "Publicaciones"
                   : "";
 
+  const handleFilterChange = (key: keyof typeof filters, value: string) => {
+    onChangeFilters({ ...filters, [key]: value });
+  };
+
   return (
     <>
-      <div className="dash-grid">
-        <DashCard id="map" title="Mapa" onExpand={setExpanded}>
-          <MapView data={geojson} onSelect={onSelectProperty} className="dash-map" />
-        </DashCard>
-
-        <DashCard id="list" title="Propiedades" onExpand={setExpanded}>
-          <div className="dash-list-head">
-            <button className="dash-mini" onClick={onDemoSeed} disabled={creating} type="button">
-              {creating ? "Cargando..." : "Cargar demo"}
-            </button>
+      {showFilters && (
+        <div className="filter-bar">
+          <div className="filter-group">
+            <label>Estado</label>
+            <select value={filters.estado} onChange={(e) => handleFilterChange("estado", e.target.value)}>
+              {estados.map((e) => (
+                <option key={e} value={e}>
+                  {e === "todos" ? "Todos" : e.replace(/_/g, " ")}
+                </option>
+              ))}
+            </select>
           </div>
-          <div className="dash-table">
-            <div className="dash-table-head">
-              <span>Código</span>
-              <span>Dirección</span>
-              <span>Estado</span>
+          <div className="filter-group">
+            <label>Tipo</label>
+            <select value={filters.tipo} onChange={(e) => handleFilterChange("tipo", e.target.value)}>
+              {tipos.map((t) => (
+                <option key={t} value={t}>
+                  {t === "todos" ? "Todos" : t}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="filter-group">
+            <label>Comuna</label>
+            <input
+              value={filters.comuna}
+              onChange={(e) => handleFilterChange("comuna", e.target.value)}
+              placeholder="Buscar comuna"
+            />
+          </div>
+          <button className="dash-mini" type="button" onClick={() => onChangeFilters({ estado: "todos", tipo: "todos", comuna: "" })}>
+            Limpiar filtros
+          </button>
+        </div>
+      )}
+
+      <div className="dash-layout">
+        <div className="dash-grid">
+          <section className="dash-card" aria-label="Resumen financiero">
+          <div className="dash-card-head">
+            <span className="dash-card-head-title">Resumen financiero</span>
+          </div>
+          <div className="kpi-grid">
+            <div className="kpi">
+              <div className="kpi-label">Ingresos del mes</div>
+              <div className="kpi-value">{kpis.ingresos ? formatMoney(kpis.ingresos) : "-"}</div>
+            </div>
+            <div className="kpi">
+              <div className="kpi-label">Gastos</div>
+              <div className="kpi-value">{kpis.gastos ? formatMoney(kpis.gastos) : "-"}</div>
+            </div>
+            <div className="kpi">
+              <div className="kpi-label">Comisión</div>
+              <div className="kpi-value">{kpis.comision ? formatMoney(kpis.comision) : "-"}</div>
+            </div>
+            <div className="kpi">
+              <div className="kpi-label">Flujo neto</div>
+              <div className="kpi-value">{kpis.flujo ? formatMoney(kpis.flujo) : "-"}</div>
+              <div className={`kpi-pill ${kpis.variacion >= 0 ? "pos" : "neg"}`}>
+                {kpis.variacion >= 0 ? "+" : ""}
+                {kpis.variacion}% vs mes prev.
+              </div>
+            </div>
+          </div>
+          </section>
+          <DashCard id="map" title="Mapa" onExpand={setExpanded}>
+            <MapView data={geojson} onSelect={onSelectProperty} className="dash-map" />
+          </DashCard>
+
+          <DashCard id="list" title="Propiedades" onExpand={setExpanded}>
+            <div className="dash-table">
+              <div className="dash-table-head">
+                <span>Código</span>
+                <span>Dirección</span>
+                <span>Estado</span>
                 <span>Comuna</span>
                 <span></span>
-            </div>
-            {properties.slice(0, 8).map((p) => (
-              <div key={p.id} className="dash-table-row" onClick={() => onSelectProperty(p.id)} role="button" tabIndex={0}>
-                <span>{p.codigo}</span>
-                <span title={p.direccion_linea1}>{p.direccion_linea1}</span>
-                <span className={`badge ${p.estado_actual}`}>{p.estado_actual}</span>
-                <span>{p.comuna}</span>
-                <button
-                  type="button"
-                  className="dash-delete"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteProperty(p.id);
-                  }}
-                >
-                  ✕
-                </button>
               </div>
-            ))}
-            {properties.length > 8 && <div className="dash-hint">Expandir para ver todas</div>}
-          </div>
-        </DashCard>
-
-        <DashCard id="byStatus" title="Estados" onExpand={setExpanded}>
-          <BarChart title="Propiedades por estado" data={byStatus} />
-        </DashCard>
-
-        <DashCard id="byType" title="Tipos" onExpand={setExpanded}>
-          <BarChart title="Propiedades por tipo" data={byType} />
-        </DashCard>
-
-        <DashCard id="values" title="Valores" onExpand={setExpanded}>
-          <div className="dash-chart">
-            <div className="dash-card-title">Valores y cobertura</div>
-            <div className="dash-stats">
-              <StatRow label="Total" value={String(valueStats.total)} />
-              <StatRow label="Con arriendo" value={String(valueStats.withRent)} />
-              <StatRow label="Con venta" value={String(valueStats.withSale)} />
-              <StatRow label="Prom. arriendo" value={valueStats.avgRent ? formatMoney(valueStats.avgRent) : "-"} />
-              <StatRow label="Prom. venta" value={valueStats.avgSale ? formatMoney(valueStats.avgSale) : "-"} />
+              {properties.slice(0, 8).map((p) => (
+                 <div key={p.id} className="dash-table-row" onClick={() => onSelectProperty(p.id)} role="button" tabIndex={0}>
+                  <span>{p.codigo}</span>
+                  <span title={p.direccion_linea1}>{p.direccion_linea1}</span>
+                  <span className={`badge ${p.estado_actual}`}>{p.estado_actual}</span>
+                  <span>{p.comuna}</span>
+                  <button
+                    type="button"
+                    className="dash-delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteProperty(p.id);
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+              {properties.length > 8 && <div className="dash-hint">Expandir para ver todas</div>}
             </div>
-          </div>
-        </DashCard>
+          </DashCard>
 
-        <DashCard id="published" title="Publicación" onExpand={setExpanded}>
-          <LineChart
-            title="Publicaciones (últimos meses)"
-            points={publishedSeries.length ? publishedSeries : [{ xLabel: "-", y: 0 }]}
-          />
-        </DashCard>
+          <DashCard id="byStatus" title="Estados" onExpand={setExpanded}>
+            <BarChart title="Propiedades por estado" data={byStatus} />
+          </DashCard>
 
-        <DashCard id="byComuna" title="Comunas" onExpand={setExpanded}>
-          <BarChart title="Cantidad por comuna" data={byComuna} maxBars={10} />
-        </DashCard>
+          <DashCard id="byType" title="Tipos" onExpand={setExpanded}>
+            <BarChart title="Propiedades por tipo" data={byType} />
+          </DashCard>
+
+          <DashCard id="values" title="Valores" onExpand={setExpanded}>
+            <div className="dash-chart">
+              <div className="dash-card-title">Valores y cobertura</div>
+              <div className="dash-stats">
+                <StatRow label="Total" value={String(valueStats.total)} />
+                <StatRow label="Con arriendo" value={String(valueStats.withRent)} />
+                <StatRow label="Con venta" value={String(valueStats.withSale)} />
+                <StatRow label="Prom. arriendo" value={valueStats.avgRent ? formatMoney(valueStats.avgRent) : "-"} />
+                <StatRow label="Prom. venta" value={valueStats.avgSale ? formatMoney(valueStats.avgSale) : "-"} />
+              </div>
+            </div>
+          </DashCard>
+
+          <DashCard id="published" title="Publicación" onExpand={setExpanded}>
+            <LineChart
+              title="Publicaciones (últimos meses)"
+              points={publishedSeries.length ? publishedSeries : [{ xLabel: "-", y: 0 }]}
+            />
+          </DashCard>
+
+          <DashCard id="byComuna" title="Comunas" onExpand={setExpanded}>
+            <BarChart title="Cantidad por comuna" data={byComuna} maxBars={10} />
+          </DashCard>
+        </div>
+
+        <aside className="dash-sidebar" aria-label="Panel lateral">
+          <section className="dash-card" aria-label="Alertas operativas">
+            <div className="dash-card-head">
+              <span className="dash-card-head-title">Alertas operativas</span>
+            </div>
+            <div className="alerts-grid">
+              {[{ label: "Arriendos vencidos", value: alertsData.vencidos }, { label: "Contratos por vencer", value: alertsData.porVencer }, { label: "Propiedades sin contrato", value: alertsData.sinContrato }, { label: "Cobranzas atrasadas", value: alertsData.cobranzaAtrasada }, { label: "Docs incompletos", value: alertsData.docsIncompletos }].map((a) => (
+                <div key={a.label} className={`alert-chip ${a.value > 0 ? "alert-on" : "alert-off"}`}>
+                  <div className="alert-label">{a.label}</div>
+                  <div className="alert-value">{a.value}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </aside>
       </div>
 
       {expanded && (

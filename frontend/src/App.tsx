@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   fetchProperties,
   fetchGeoJson,
@@ -33,6 +33,8 @@ function App() {
   const [docFile, setDocFile] = useState<File | null>(null);
   const [docCategoria, setDocCategoria] = useState("escritura");
   const [selectedProp, setSelectedProp] = useState<string>("");
+  const [arrendatarioId, setArrendatarioId] = useState<string>("");
+  const [propietarioId, setPropietarioId] = useState<string>("");
   const [showModal, setShowModal] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [detail, setDetail] = useState<any>(null);
@@ -41,6 +43,96 @@ function App() {
   const [detailsCache, setDetailsCache] = useState<Record<string, any>>({});
   const defaultLat = -33.45;
   const defaultLon = -70.66;
+  const [toast, setToast] = useState<string | null>(null);
+  const [filters, setFilters] = useState({ estado: "todos", tipo: "todos", comuna: "" });
+  const [showFilters, setShowFilters] = useState(false);
+  const [alertsData, setAlertsData] = useState({
+    vencidos: 0,
+    porVencer: 0,
+    sinContrato: 0,
+    cobranzaAtrasada: 0,
+    docsIncompletos: 0,
+  });
+  const [nowScl, setNowScl] = useState<Date>(new Date());
+
+  useEffect(() => {
+    const id = setInterval(() => setNowScl(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const nowLabel = useMemo(() => {
+    try {
+      return new Intl.DateTimeFormat("es-CL", {
+        timeZone: "America/Santiago",
+        dateStyle: "medium",
+        timeStyle: "medium",
+      }).format(nowScl);
+    } catch {
+      return nowScl.toISOString();
+    }
+  }, [nowScl]);
+
+  const filteredProperties = useMemo(() => {
+    return properties.filter((p) => {
+      const matchEstado = filters.estado === "todos" || (p.estado_actual || "").toLowerCase() === filters.estado;
+      const matchTipo = filters.tipo === "todos" || (p.tipo || "").toLowerCase() === filters.tipo;
+      const matchComuna = filters.comuna ? (p.comuna || "").toLowerCase().includes(filters.comuna.toLowerCase()) : true;
+      return matchEstado && matchTipo && matchComuna;
+    });
+  }, [filters, properties]);
+
+  const filteredGeojson = useMemo(() => {
+    const allowed = new Set(filteredProperties.map((p) => p.id));
+    const nextFeatures = (geojson.features || []).filter((f: any) => allowed.has(f.properties.id));
+    return { ...geojson, features: nextFeatures };
+  }, [filteredProperties, geojson]);
+
+  const computeAlerts = (props: Property[], cache: Record<string, any>) => {
+    const tzNow = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Santiago" }));
+    const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+
+    let vencidos = 0;
+    let porVencer = 0;
+    let sinContrato = 0;
+    let cobranzaAtrasada = 0;
+    let docsIncompletos = 0;
+
+    for (const p of props) {
+      const detail = cache[p.id];
+      const contract = detail?.current_contract;
+      const charges = detail?.charges || [];
+      const docs = detail?.documents || [];
+
+      if (!contract && (p.estado_actual || "").toLowerCase() === "disponible") sinContrato += 1;
+
+      if (contract?.fecha_fin) {
+        const fin = new Date(contract.fecha_fin);
+        if (!Number.isNaN(fin.getTime())) {
+          if (fin < tzNow) vencidos += 1;
+          else if (fin <= addDays(tzNow, 30)) porVencer += 1;
+        }
+      }
+
+      const hasDocs = docs.length > 0;
+      if (!hasDocs) docsIncompletos += 1;
+
+      const lateCharge = charges.find((c: any) => {
+        const venc = c.fecha_vencimiento ? new Date(c.fecha_vencimiento) : null;
+        const isLate = venc ? venc < tzNow : false;
+        const estado = (c.estado || "").toLowerCase();
+        return estado === "atraso" || estado === "pendiente" && isLate;
+      });
+      if (lateCharge) cobranzaAtrasada += 1;
+    }
+
+    return { vencidos, porVencer, sinContrato, cobranzaAtrasada, docsIncompletos };
+  };
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2200);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   async function geocodeAddress(address: string): Promise<{
     lat: number;
@@ -65,6 +157,12 @@ function App() {
       return null;
     }
   }
+
+  const inferComunaFromAddress = (address: string) => {
+    const lower = address.toLowerCase();
+    if (lower.includes("ñuñoa") || lower.includes("nunoa")) return "Ñuñoa";
+    return null;
+  };
 
   async function prefetchDetails(props: Property[]) {
     if (!props.length) return;
@@ -109,6 +207,59 @@ function App() {
     load();
   }, [token]);
 
+  useEffect(() => {
+    const hydrateAlerts = async () => {
+      if (!properties.length) {
+        setAlertsData({ vencidos: 0, porVencer: 0, sinContrato: 0, cobranzaAtrasada: 0, docsIncompletos: 0 });
+        return;
+      }
+      const copyCache: Record<string, any> = { ...detailsCache };
+      for (const p of properties) {
+        if (copyCache[p.id]) continue;
+        try {
+          const full = await fetchPropertyFull(p.id);
+          copyCache[p.id] = full;
+          setDetailsCache((prev) => ({ ...prev, [p.id]: full }));
+        } catch {
+          /* ignore single failures */
+        }
+      }
+      setAlertsData(computeAlerts(properties, copyCache));
+    };
+    hydrateAlerts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [properties]);
+
+  useEffect(() => {
+    const populateParties = async () => {
+      if (!selectedProp) {
+        setArrendatarioId("");
+        setPropietarioId("");
+        return;
+      }
+
+      const cached = detailsCache[selectedProp];
+      if (cached?.current_contract) {
+        setArrendatarioId(cached.current_contract.arrendatario?.id || "");
+        setPropietarioId(cached.current_contract.propietario?.id || "");
+        return;
+      }
+
+      try {
+        const full = await fetchPropertyFull(selectedProp);
+        setDetailsCache((prev) => ({ ...prev, [selectedProp]: full }));
+        if (full?.current_contract) {
+          setArrendatarioId(full.current_contract.arrendatario?.id || "");
+          setPropietarioId(full.current_contract.propietario?.id || "");
+        }
+      } catch (err) {
+        // Best-effort prefill; ignore errors
+      }
+    };
+
+    void populateParties();
+  }, [selectedProp, detailsCache]);
+
   const handleLogin = (tok: string) => {
     setToken(tok);
     setTokenState(tok);
@@ -134,11 +285,13 @@ function App() {
       }
 
       const geo = await geocodeAddress(newProp.direccion_linea1);
+      const fallbackComuna = inferComunaFromAddress(newProp.direccion_linea1);
+      const geoComuna = geo?.comuna?.toLowerCase().includes("provincia de santiago") && fallbackComuna ? null : geo?.comuna;
       const generatedCode = newProp.codigo?.trim() || `PRP-${Date.now()}`;
       const payload = {
         codigo: generatedCode,
         direccion_linea1: newProp.direccion_linea1,
-        comuna: geo?.comuna || "Sin comuna",
+        comuna: fallbackComuna || geoComuna || "Sin comuna",
         region: geo?.region || "Sin región",
         tipo: newProp.tipo,
         estado_actual: "disponible",
@@ -153,6 +306,7 @@ function App() {
       const refreshedGeo = await fetchGeoJson();
       setGeojson(refreshedGeo);
       setSelectedProp(created.id);
+      setToast("Propiedad creada y ubicada en el mapa");
       setNewProp({ direccion_linea1: "", tipo: "casa", codigo: "" });
     } catch (err: any) {
       setError("No se pudo crear la propiedad");
@@ -167,10 +321,25 @@ function App() {
     setUploading(true);
     setError(null);
     try {
-      await uploadDocument(selectedProp, docFile, docCategoria);
+      if (docCategoria === "contrato_arriendo") {
+        if (!arrendatarioId || !propietarioId) {
+          setError("Debes indicar arrendatario y propietario para el contrato");
+          setUploading(false);
+          return;
+        }
+      }
+
+      await uploadDocument(selectedProp, docFile, docCategoria, "propiedad", {
+        arrendatario_id: arrendatarioId || undefined,
+        propietario_id: propietarioId || undefined,
+      });
       const full = await fetchPropertyFull(selectedProp);
       setDetailsCache((prev) => ({ ...prev, [selectedProp]: full }));
       if (detailId === selectedProp) setDetail(full);
+      setToast("Documento subido");
+      setDocCategoria("escritura");
+      setArrendatarioId("");
+      setPropietarioId("");
     } catch (err: any) {
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
@@ -247,6 +416,7 @@ function App() {
       const full = await fetchPropertyFull(detailId);
       setDetailsCache((prev) => ({ ...prev, [detailId]: full }));
       setDetail(full);
+      setToast("Documento reemplazado");
     } catch (err: any) {
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
@@ -354,9 +524,15 @@ function App() {
   return (
     <div className="layout">
       <header className="topbar">
-        <span>SIGAP – Mapa de Propiedades</span>
+        <div className="topbar-title">
+          <span>SIGAP – Mapa de Propiedades</span>
+          <span className="clock">{nowLabel} (Santiago)</span>
+        </div>
         <div className="top-actions">
           {prefetching && <span className="prefetch-pill">Sincronizando datos…</span>}
+          <button className="ghost" onClick={() => setShowFilters((v) => !v)}>
+            {showFilters ? "Ocultar filtros" : "Mostrar filtros"}
+          </button>
           <button onClick={() => setShowModal(true)}>Agregar propiedad</button>
           <button className="ghost" onClick={handleLogout}>
             Cerrar sesión
@@ -365,12 +541,15 @@ function App() {
       </header>
       <main className="dash-page">
         <Dashboard
-          properties={properties}
-          geojson={geojson}
+          properties={filteredProperties}
+          fullProperties={properties}
+          geojson={filteredGeojson}
           onSelectProperty={handleSelectProperty}
-          onDemoSeed={handleDemoSeed}
-          creating={creating}
           onDeleteProperty={handleDeleteProperty}
+          filters={filters}
+          onChangeFilters={setFilters}
+          alertsData={alertsData}
+          showFilters={showFilters}
         />
       </main>
 
@@ -442,6 +621,29 @@ function App() {
                     <option value="recibo">Recibo</option>
                   </select>
                 </label>
+                {docCategoria === "contrato_arriendo" && (
+                  <>
+                    <label>
+                      Arrendatario (UUID)
+                      <input
+                        value={arrendatarioId}
+                        onChange={(e) => setArrendatarioId(e.target.value)}
+                        placeholder="ID de arrendatario"
+                        required
+                      />
+                    </label>
+                    <label>
+                      Propietario (UUID)
+                      <input
+                        value={propietarioId}
+                        onChange={(e) => setPropietarioId(e.target.value)}
+                        placeholder="ID de propietario"
+                        required
+                      />
+                    </label>
+                    <p className="muted">Si la propiedad ya tiene contrato, prellenamos los IDs; puedes reemplazarlos.</p>
+                  </>
+                )}
                 <label>
                   Archivo
                   <input
@@ -520,19 +722,19 @@ function App() {
                     <div className="doc-list">
                       {detail.documents.map((d: any) => (
                         <div key={d.id} className="doc-row">
-                          <div>
-                            <div>{d.categoria} · {d.filename}</div>
+                          <div className="doc-meta">
+                            <div className="doc-name">{d.categoria} · {d.filename}</div>
                             <div className="muted">v{d.version}</div>
                           </div>
                           <div className="doc-actions">
-                            <button type="button" className="link" onClick={() => handleOpenDocument(d.id, d.filename)}>
-                              Abrir
+                            <button type="button" className="icon-btn" title="Abrir" onClick={() => handleOpenDocument(d.id, d.filename)}>
+                              ↗
                             </button>
-                            <button type="button" className="link" onClick={() => handleDeleteDocument(d.id)}>
-                              Eliminar
+                            <button type="button" className="icon-btn danger" title="Eliminar" onClick={() => handleDeleteDocument(d.id)}>
+                              ✕
                             </button>
-                            <label className="link">
-                              Reemplazar
+                            <label className="icon-btn" title="Reemplazar">
+                              ⟳
                               <input
                                 type="file"
                                 className="sr-only"
@@ -583,6 +785,13 @@ function App() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="toast" role="status">
+          <div className="toast-icon" aria-hidden="true">✓</div>
+          <span>{toast}</span>
         </div>
       )}
     </div>

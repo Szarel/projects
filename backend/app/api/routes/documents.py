@@ -1,5 +1,9 @@
 import os
+import re
 import uuid
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from io import BytesIO
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -7,14 +11,119 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from PyPDF2 import PdfReader
+
 from app.api.deps import get_current_user, require_roles
 from app.core.config import settings
 from app.db.session import get_session
+from app.models.contract import AdjustmentType, ContractStatus, Currency, LeaseContract
 from app.models.document import Document
+from app.models.person import Person
+from app.models.property import Property, PropertyState
+from app.models.property_state import PropertyStateHistory
 from app.schemas.document import DocumentCreate, DocumentRead
 from app.models.user import User, UserRole
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+
+def _parse_contract_pdf(raw: bytes) -> dict:
+    """Best-effort extraction of key fields from a lease contract PDF."""
+    try:
+        reader = PdfReader(BytesIO(raw))
+        text = "\n".join((page.extract_text() or "") for page in reader.pages)
+    except Exception:
+        return {}
+
+    def _find_date(label: str) -> date | None:
+        m = re.search(fr"(?i){label}[^0-9]*(\d{{1,2}}[/-]\d{{1,2}}[/-]\d{{2,4}})", text)
+        if not m:
+            return None
+        raw_date = m.group(1)
+        for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%d-%m-%y", "%d/%m/%y"):
+            try:
+                return datetime.strptime(raw_date, fmt).date()
+            except Exception:
+                continue
+        return None
+
+    def _find_int(label: str) -> int | None:
+        m = re.search(fr"(?i){label}[^0-9]*(\d{{1,2}})", text)
+        return int(m.group(1)) if m else None
+
+    def _find_amount(label: str) -> Decimal | None:
+        m = re.search(fr"(?i){label}[^0-9]*([0-9\.\,]+)", text)
+        if not m:
+            return None
+        raw_amt = m.group(1).replace(".", "").replace(",", ".")
+        try:
+            return Decimal(raw_amt)
+        except Exception:
+            return None
+
+    return {
+        "fecha_inicio": _find_date("inicio"),
+        "fecha_fin": _find_date("termino|término|fin"),
+        "dia_pago": _find_int("dia de pago|día de pago"),
+        "renta_mensual": _find_amount("renta mensual|canon|arriendo"),
+    }
+
+
+async def _attach_contract_from_pdf(
+    *,
+    session: AsyncSession,
+    property_id: uuid.UUID,
+    arrendatario_id: uuid.UUID,
+    propietario_id: uuid.UUID,
+    parsed: dict,
+    current_user_id: uuid.UUID,
+) -> None:
+    prop = await session.get(Property, property_id)
+    if not prop:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Property not found")
+
+    # Validate parties exist
+    for model, eid, message in (
+        (Person, arrendatario_id, "Tenant not found"),
+        (Person, propietario_id, "Owner not found"),
+    ):
+        obj = await session.get(model, eid)
+        if not obj:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=message)
+
+    start_date: date = parsed.get("fecha_inicio") or date.today()
+    end_date: date = parsed.get("fecha_fin") or (start_date + timedelta(days=365))
+    pay_day: int | None = parsed.get("dia_pago") or 5
+    renta: Decimal = parsed.get("renta_mensual") or (prop.valor_arriendo or Decimal("0"))
+
+    contract = LeaseContract(
+        propiedad_id=prop.id,
+        arrendatario_id=arrendatario_id,
+        propietario_id=propietario_id,
+        fecha_inicio=start_date,
+        fecha_fin=end_date,
+        renta_mensual=renta,
+        moneda=Currency.CLP,
+        reajuste_tipo=AdjustmentType.NONE,
+        dia_pago=pay_day,
+        estado=ContractStatus.VIGENTE,
+        notas="Autogenerado desde PDF de contrato",
+    )
+
+    prop.estado_actual = PropertyState.ARRENDADA
+    if prop.valor_arriendo is None and renta:
+        prop.valor_arriendo = renta
+
+    history = PropertyStateHistory(
+        propiedad_id=prop.id,
+        estado=PropertyState.ARRENDADA,
+        motivo="Contrato de arriendo cargado",
+        fecha_inicio=date.today(),
+        actor_id=current_user_id,
+    )
+
+    session.add(contract)
+    session.add(history)
 
 
 @router.get("", response_model=list[DocumentRead])
@@ -40,6 +149,8 @@ async def upload_document(
     entidad_id: str = Form(...),
     categoria: str = Form(...),
     file: UploadFile = File(...),
+    arrendatario_id: str | None = Form(None),
+    propietario_id: str | None = Form(None),
     session: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.CORREDOR, UserRole.FINANZAS)),
 ) -> DocumentRead:
@@ -53,10 +164,11 @@ async def upload_document(
     content = await file.read()
     storage_path.write_bytes(content)
 
+    entity_uuid = uuid.UUID(entidad_id)
     document = Document(
         id=doc_id,
         entidad_tipo=entidad_tipo,
-        entidad_id=uuid.UUID(entidad_id),
+        entidad_id=entity_uuid,
         categoria=categoria,
         filename=file.filename,
         storage_path=str(storage_path),
@@ -65,6 +177,20 @@ async def upload_document(
         created_by=current_user.id,
     )
     session.add(document)
+
+    if entidad_tipo == "propiedad" and categoria == "contrato_arriendo":
+        if not arrendatario_id or not propietario_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="arrendatario_id y propietario_id son requeridos para contratos de arriendo")
+        parsed = _parse_contract_pdf(content)
+        await _attach_contract_from_pdf(
+            session=session,
+            property_id=entity_uuid,
+            arrendatario_id=uuid.UUID(arrendatario_id),
+            propietario_id=uuid.UUID(propietario_id),
+            parsed=parsed,
+            current_user_id=current_user.id,
+        )
+
     await session.commit()
     await session.refresh(document)
     return document

@@ -111,12 +111,15 @@ export async function uploadDocument(
   entidad_id: string,
   file: File,
   categoria: string,
-  entidad_tipo = "propiedad"
+  entidad_tipo = "propiedad",
+  extras?: { arrendatario_id?: string; propietario_id?: string }
 ): Promise<void> {
   const formData = new FormData();
   formData.append("entidad_tipo", entidad_tipo);
   formData.append("entidad_id", entidad_id);
   formData.append("categoria", categoria);
   formData.append("file", file);
+   if (extras?.arrendatario_id) formData.append("arrendatario_id", extras.arrendatario_id);
+   if (extras?.propietario_id) formData.append("propietario_id", extras.propietario_id);
   await api.post("/documents", formData);
 }
