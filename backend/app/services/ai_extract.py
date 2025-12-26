@@ -57,4 +57,3 @@ def extract_contract_fields(text: str) -> Dict[str, Any]:
         return json.loads(content)
     except Exception:
         return {}
-*** End File
