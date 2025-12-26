@@ -82,6 +82,13 @@ export async function deleteDocument(documentId: string): Promise<void> {
   await api.delete(`/documents/${documentId}`);
 }
 
+export async function replaceDocument(documentId: string, file: File, categoria?: string): Promise<void> {
+  const formData = new FormData();
+  if (categoria) formData.append("categoria", categoria);
+  formData.append("file", file);
+  await api.put(`/documents/${documentId}`, formData);
+}
+
 export async function uploadDocument(
   entidad_id: string,
   file: File,

@@ -167,7 +167,10 @@ function App() {
       const full = await fetchPropertyFull(detailId);
       setDetail(full);
     } catch (err: any) {
-      setError("No se pudo eliminar el documento");
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      const extra = detail ? `: ${typeof detail === "string" ? detail : JSON.stringify(detail)}` : "";
+      setError(`No se pudo eliminar el documento${status ? ` (${status})` : ""}${extra}`);
     }
   };
 
@@ -176,14 +179,14 @@ function App() {
     setUploading(true);
     setError(null);
     try {
-      await uploadDocument(detailId, file, doc.categoria, doc.entidad_tipo);
+      await replaceDocument(doc.id, file, doc.categoria);
       const full = await fetchPropertyFull(detailId);
       setDetail(full);
     } catch (err: any) {
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
       const extra = detail ? `: ${typeof detail === "string" ? detail : JSON.stringify(detail)}` : "";
-      setError(`No se pudo subir el documento${status ? ` (${status})` : ""}${extra}`);
+      setError(`No se pudo reemplazar el documento${status ? ` (${status})` : ""}${extra}`);
     } finally {
       setUploading(false);
     }

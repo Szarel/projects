@@ -80,7 +80,10 @@ async def download_document(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     path = Path(document.storage_path)
     if not path.exists():
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="File missing on storage")
+        # Mark as inactive to avoid repeated 410s.
+        document.activo = False
+        await session.commit()
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="File missing; reemplace o cargue nuevamente")
     return FileResponse(path, filename=document.filename)
 
 
@@ -107,3 +110,36 @@ async def delete_document(
         pass
 
     return None
+
+
+@router.put("/{document_id}", response_model=DocumentRead)
+async def replace_document(
+    document_id: uuid.UUID,
+    categoria: str | None = Form(None),
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.CORREDOR, UserRole.FINANZAS)),
+) -> DocumentRead:
+    document = await session.get(Document, document_id)
+    if not document or not document.activo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    storage_root = Path(settings.storage_dir)
+    storage_root.mkdir(parents=True, exist_ok=True)
+
+    new_id = uuid.uuid4()
+    filename = f"{new_id}_{file.filename}"
+    storage_path = storage_root / filename
+
+    content = await file.read()
+    storage_path.write_bytes(content)
+
+    document.filename = file.filename
+    document.storage_path = str(storage_path)
+    document.version = (document.version or 1) + 1
+    if categoria:
+        document.categoria = categoria
+
+    await session.commit()
+    await session.refresh(document)
+    return document
