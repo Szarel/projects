@@ -6,6 +6,33 @@ from google import genai
 from app.core.config import settings
 
 
+_NAME_PREFIXES = [
+    "entre",
+    "con",
+    "y",
+    "el",
+    "la",
+    "don",
+    "doña",
+    "sr",
+    "sra",
+    "sr.",
+    "sra.",
+]
+
+
+def _clean_name(name: str | None) -> str | None:
+    if not name:
+        return None
+    cleaned = name.strip().strip(",;:.- ")
+    parts = cleaned.split()
+    # Drop leading prefixes/titles/connectors
+    while parts and parts[0].lower().strip(". ") in _NAME_PREFIXES:
+        parts.pop(0)
+    cleaned = " ".join(parts)
+    return cleaned or None
+
+
 def _client() -> genai.Client | None:
     api_key = settings.gemini_api_key
     if not api_key:
@@ -33,13 +60,15 @@ def extract_contract_fields(text: str) -> Dict[str, Any]:
         return {}
 
     prompt = (
-        "Eres un extractor de contratos de arriendo en Chile. Devuelve SOLO JSON con estas claves exactas: "
+        "Eres un extractor de contratos de arriendo en Chile. Devuelve SOLO un JSON plano con estas claves exactas: "
         "arrendatario_nombre, arrendatario_rut, propietario_nombre, propietario_rut, fecha_inicio (YYYY-MM-DD), "
-        "fecha_fin (YYYY-MM-DD), dia_pago (1-31), renta_mensual (numero, en CLP), moneda (CLP o UF), direccion. "
-        "Reglas: 1) No inventes datos; si no esta, usa null. 2) Formato fecha ISO YYYY-MM-DD. 3) Si hay rango, usa inicio mas temprano y fin mas tardio del contrato. "
-        "4) Dia de pago: si dice 'primeros dias habiles' o similar, usa 5. 5) renta_mensual: toma el monto principal de arriendo (el mayor si hay varios) en CLP, sin puntos ni simbolos. "
-        "6) RUT: usa el que aparezca (formato 9.999.999-9); no generes uno. 7) direccion: texto breve de direccion del inmueble. "
-        "Devuelve un JSON plano sin texto adicional ni backticks."
+        "fecha_fin (YYYY-MM-DD), dia_pago (1-31), renta_mensual (numero en CLP), moneda (CLP o UF), direccion. "
+        "Reglas: 1) No inventes; si falta, usa null. 2) Fechas en ISO; si hay rango, usa inicio mas temprano y fin mas tardio del contrato. "
+        "3) Dia de pago: si dice 'primeros dias habiles', usa 5. 4) Renta: monto principal de arriendo (el mayor si hay varios), en CLP, sin simbolos ni puntos. "
+        "5) RUT: usa el que aparezca (formato 9.999.999-9), no generes uno. 6) Direccion: texto breve del inmueble. "
+        "7) Nombres: elimina conectores ('entre', 'con', 'y'), articulos ('el', 'la'), titulos ('don', 'doña', 'sr', 'sra'). Devuelve solo el nombre completo o razon social tal como aparece, sin palabras extra. "
+        "Ejemplo de salida: {\"arrendatario_nombre\": \"Intendencia Regional de Atacama\", \"arrendatario_rut\": \"60.511.030-4\", \"propietario_nombre\": \"Hector Patricio Olave Fara\", \"propietario_rut\": \"9.647.123-8\", \"fecha_inicio\": \"2003-04-01\", \"fecha_fin\": \"2003-12-31\", \"dia_pago\": 5, \"renta_mensual\": 350000, \"moneda\": \"CLP\", \"direccion\": \"Colipi 611, Copiapo, Atacama\"}. "
+        "Devuelve solo JSON, sin texto extra ni backticks."
     )
 
     try:
@@ -54,6 +83,10 @@ def extract_contract_fields(text: str) -> Dict[str, Any]:
             content = content.strip("` ")
         if content.lower().startswith("json"):
             content = content[4:].strip()
-        return json.loads(content)
+        data = json.loads(content)
+        if isinstance(data, dict):
+            data["arrendatario_nombre"] = _clean_name(data.get("arrendatario_nombre"))
+            data["propietario_nombre"] = _clean_name(data.get("propietario_nombre"))
+        return data
     except Exception:
         return {}
