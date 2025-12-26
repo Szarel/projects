@@ -131,6 +131,20 @@ function LineChart({
   );
 }
 
+function statusStyles(estado?: string): { color: string; label: string } {
+  const map: Record<string, string> = {
+    disponible: "#f1c40f",
+    arrendada: "#2ecc71",
+    en_venta: "#3498db",
+    arrendada_en_venta: "#9b59b6",
+    mantencion: "#e67e22",
+    suspendida: "#95a5a6",
+    baja: "#e74c3c",
+  };
+  const key = (estado || "").toLowerCase();
+  return { color: map[key] || "#7f8c8d", label: estado || "" };
+}
+
 function DashCard({
   id,
   title,
@@ -319,28 +333,21 @@ export default function Dashboard({ properties, fullProperties, geojson, onSelec
           <DashCard id="list" title="Propiedades" onExpand={setExpanded}>
             <div className="dash-table">
               <div className="dash-table-head">
-                <span>Código</span>
                 <span>Dirección</span>
                 <span>Estado</span>
-                <span>Comuna</span>
-                <span></span>
               </div>
               {properties.slice(0, 8).map((p) => (
-                 <div key={p.id} className="dash-table-row" onClick={() => onSelectProperty(p.id)} role="button" tabIndex={0}>
-                  <span>{p.codigo}</span>
-                  <span title={p.direccion_linea1}>{p.direccion_linea1}</span>
-                  <span className={`badge ${p.estado_actual}`}>{p.estado_actual}</span>
-                  <span>{p.comuna}</span>
-                  <button
-                    type="button"
-                    className="dash-delete"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeleteProperty(p.id);
-                    }}
-                  >
-                    ✕
-                  </button>
+                <div key={p.id} className="dash-table-row" onClick={() => onSelectProperty(p.id)} role="button" tabIndex={0}>
+                  <span className="dash-address" title={p.direccion_linea1}>
+                    {p.direccion_linea1}
+                  </span>
+                  <span className="dash-state-chip" title={statusStyles(p.estado_actual).label.replace(/_/g, " ")}>
+                    <span
+                      className="dash-state-dot"
+                      style={{ backgroundColor: statusStyles(p.estado_actual).color }}
+                      aria-label={statusStyles(p.estado_actual).label.replace(/_/g, " ") || "Estado"}
+                    />
+                  </span>
                 </div>
               ))}
               {properties.length > 8 && <div className="dash-hint">Expandir para ver todas</div>}

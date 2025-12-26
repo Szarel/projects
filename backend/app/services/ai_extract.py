@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import Any, Dict
 
 from google import genai
@@ -87,6 +88,61 @@ def extract_contract_fields(text: str) -> Dict[str, Any]:
         if isinstance(data, dict):
             data["arrendatario_nombre"] = _clean_name(data.get("arrendatario_nombre"))
             data["propietario_nombre"] = _clean_name(data.get("propietario_nombre"))
+        return data
+    except Exception:
+        return {}
+
+
+def extract_payment_from_image(raw: bytes, mime_type: str | None = None) -> Dict[str, Any]:
+    """Use Gemini to read a payment receipt image and return structured fields.
+
+    Expected keys: monto_pagado (number), fecha_pago (YYYY-MM-DD), medio_pago (str|None), referencia (str|None).
+    Returns empty dict on missing config or errors.
+    """
+    client = _client()
+    if not client or not raw:
+        return {}
+
+    mime = mime_type or "image/jpeg"
+    prompt = (
+        "Eres un lector de comprobantes de pago en Chile. Devuelve SOLO un JSON plano con estas claves exactas: "
+        "monto_pagado (numero, CLP, sin puntos), fecha_pago (YYYY-MM-DD), medio_pago (texto corto como 'transferencia' o banco), "
+        "referencia (codigo de transaccion u observacion). Si falta un dato usa null. No inventes montos."
+    )
+
+    try:
+        resp = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=[
+                {
+                    "role": "user",
+                    "parts": [
+                        prompt,
+                        {"inline_data": {"mime_type": mime, "data": raw}},
+                    ],
+                }
+            ],
+        )
+        content = (resp.text or "").strip()
+        if not content:
+            return {}
+        if content.startswith("`"):
+            content = content.strip("` ")
+        if content.lower().startswith("json"):
+            content = content[4:].strip()
+        data = json.loads(content)
+        if not isinstance(data, dict):
+            return {}
+
+        # Normalize date format if model returned a timestamp or other format.
+        raw_date = data.get("fecha_pago")
+        if raw_date:
+            try:
+                parsed = datetime.fromisoformat(str(raw_date)).date()
+                data["fecha_pago"] = parsed.isoformat()
+            except Exception:
+                data["fecha_pago"] = None
+
         return data
     except Exception:
         return {}

@@ -293,11 +293,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
 }
 .dash-mini:disabled { opacity: 0.7; cursor: not-allowed; }
 
-.dash-table { display: flex; flex-direction: column; gap: 0.25rem; overflow-x: auto; }
-.dash-table-head, .dash-table-row { min-width: 560px; }
+.dash-table { display: flex; flex-direction: column; gap: 0.25rem; overflow-x: hidden; }
+.dash-table-head, .dash-table-row { min-width: 0; }
 .dash-table-head {
   display: grid;
-  grid-template-columns: 1fr 2fr 1fr 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.5rem;
   align-items: center;
   padding: 0.35rem 0;
@@ -305,6 +305,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
   font-size: 0.85rem;
   border-bottom: 1px solid var(--border);
 }
+
+.dash-table-head span:last-child { justify-self: end; }
 
 .dash-table.expanded .dash-table-head {
   grid-template-columns: 1fr 2fr 1fr 1fr 1fr auto;
@@ -319,13 +321,29 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
   color: var(--text);
   cursor: pointer;
   display: grid;
-  grid-template-columns: 1fr 2fr 1fr 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.5rem;
   align-items: center;
   padding: 0.45rem 0;
 }
 
 .dash-table.expanded .dash-table-row { grid-template-columns: 1fr 2fr 1fr 1fr 1fr auto; }
+
+.dash-state-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+  text-transform: capitalize;
+}
+
+.dash-state-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
+}
 
 .dash-delete {
   border: 1px solid var(--border);
@@ -368,11 +386,12 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: "Inter
   to { transform: translateY(0) scale(1); opacity: 1; }
 }
 
-.dash-table-row span:nth-child(2) {
+.dash-address {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.dash-state-chip { justify-content: center; }
 
 .dash-hint { margin-top: 0.5rem; color: var(--muted); font-size: 0.85rem; }
 

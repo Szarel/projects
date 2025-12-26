@@ -16,7 +16,8 @@ const stateColors: Record<string, string> = {
 };
 
 function iconFor(state: string) {
-  const color = stateColors[state] || "#34495e";
+  const key = (state || "").toLowerCase().trim();
+  const color = stateColors[key] || "#34495e";
   return L.divIcon({
     className: "marker-icon",
     html: `<span style="background:${color}"></span>`,
