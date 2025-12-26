@@ -38,6 +38,22 @@ def _parse_contract_pdf(raw: bytes) -> dict:
 
     ai_data = extract_contract_fields(text)
 
+    months = {
+        "enero": 1,
+        "febrero": 2,
+        "marzo": 3,
+        "abril": 4,
+        "mayo": 5,
+        "junio": 6,
+        "julio": 7,
+        "agosto": 8,
+        "septiembre": 9,
+        "setiembre": 9,
+        "octubre": 10,
+        "noviembre": 11,
+        "diciembre": 12,
+    }
+
     def _find_date(label: str) -> date | None:
         m = re.search(fr"(?i){label}[^0-9]*(\d{{1,2}}[/-]\d{{1,2}}[/-]\d{{2,4}})", text)
         if not m:
@@ -50,9 +66,66 @@ def _parse_contract_pdf(raw: bytes) -> dict:
                 continue
         return None
 
+    def _find_written_dates() -> list[date]:
+        results: list[date] = []
+        for m in re.finditer(r"(?i)(\d{1,2})\s+de\s+([a-záéíóú]+)\s+(?:de|del)\s+(\d{4})", text):
+            try:
+                day = int(m.group(1))
+                month = months.get(m.group(2).lower())
+                year = int(m.group(3))
+                if month:
+                    results.append(date(year, month, day))
+            except Exception:
+                continue
+        return results
+
+    def _pick_contract_dates() -> tuple[date | None, date | None]:
+        specific_start = re.search(r"(?i)regir el d[ií]a\s+(\d{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+(\d{4})", text)
+        specific_end = re.search(r"(?i)terminar[aá]? el d[ií]a\s+(\d{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+(\d{4})", text)
+        start_date = None
+        end_date = None
+        if specific_start:
+            try:
+                start_date = date(
+                    int(specific_start.group(3)),
+                    months.get(specific_start.group(2).lower()) or 1,
+                    int(specific_start.group(1)),
+                )
+            except Exception:
+                start_date = None
+        if specific_end:
+            try:
+                end_date = date(
+                    int(specific_end.group(3)),
+                    months.get(specific_end.group(2).lower()) or 1,
+                    int(specific_end.group(1)),
+                )
+            except Exception:
+                end_date = None
+
+        written_dates = _find_written_dates()
+        if not start_date or not end_date:
+            if len(written_dates) >= 3:
+                start_date = start_date or written_dates[1]
+                end_date = end_date or written_dates[2]
+            elif len(written_dates) >= 2:
+                start_date = start_date or written_dates[0]
+                end_date = end_date or written_dates[1]
+            elif len(written_dates) == 1:
+                start_date = start_date or written_dates[0]
+        return start_date, end_date
+
     def _find_int(label: str) -> int | None:
         m = re.search(fr"(?i){label}[^0-9]*(\d{{1,2}})", text)
         return int(m.group(1)) if m else None
+
+    def _find_pay_day() -> int | None:
+        m = re.search(r"(?i)(\d{1,2})\s+primeros\s+d[ií]as\s+h[aá]biles", text)
+        if m:
+            return int(m.group(1))
+        if re.search(r"(?i)cinco\s+primeros\s+d[ií]as\s+h[aá]biles", text):
+            return 5
+        return _find_int("dia de pago|día de pago")
 
     def _find_amount(label: str) -> Decimal | None:
         m = re.search(fr"(?i){label}[^0-9]*([0-9\.\,]+)", text)
@@ -64,13 +137,87 @@ def _parse_contract_pdf(raw: bytes) -> dict:
         except Exception:
             return None
 
+    def _find_amounts_any() -> list[Decimal]:
+        amounts: list[Decimal] = []
+        for m in re.finditer(r"\$?\s*([0-9]{1,3}(?:[\.\,][0-9]{3})*(?:[\.,][0-9]+)?)", text):
+            raw_amt = m.group(1).replace(".", "").replace(",", ".")
+            try:
+                amt = Decimal(raw_amt)
+                amounts.append(amt)
+            except Exception:
+                continue
+        return amounts
+
+    def _pick_rent() -> Decimal | None:
+        rent = _find_amount("renta mensual|canon|arriendo|renta de arrendamiento")
+        if rent:
+            return rent
+        candidates = _find_amounts_any()
+        if not candidates:
+            return None
+        # Heuristic: take the highest amount to avoid picking addresses or numbers like "611".
+        return max(candidates)
+
+    def _find_rut_near(label: str) -> tuple[str | None, str | None]:
+        # Returns (rut, name_snippet)
+        m = re.search(fr"(?is){label}[^\n]{{0,160}}?rut\s*([0-9\.\-kK]+)", text)
+        if not m:
+            return None, None
+        rut = m.group(1)
+        before = text[: m.start(1)]
+        snippet = before[-80:]
+        return rut, snippet
+
+    def _find_ruts_generic() -> list[tuple[str, str | None]]:
+        ruts: list[tuple[str, str | None]] = []
+        for m in re.finditer(r"(\d{1,2}\.?\d{3}\.?\d{3}-[0-9Kk])", text):
+            rut = m.group(1)
+            before = text[: m.start(1)]
+            snippet = before[-80:]
+            ruts.append((rut, snippet))
+        return ruts
+
+    def _extract_name(snippet: str | None) -> str | None:
+        if not snippet:
+            return None
+        parts = re.findall(r"(?i)(don|doña)?\s*([A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ\s']{5,80})", snippet)
+        if parts:
+            # Take the last candidate, strip markers like don/doña
+            name = parts[-1][1].strip()
+            return " ".join(name.split())
+        return None
+
+    start_written, end_written = _pick_contract_dates()
+
+    arr_rut_raw, arr_snippet = _find_rut_near("arrendatario|arrendadora")
+    prop_rut_raw, prop_snippet = _find_rut_near("arrendador|propietario")
+
+    if not arr_rut_raw or not prop_rut_raw:
+        generic_ruts = _find_ruts_generic()
+        if generic_ruts:
+            if not prop_rut_raw and len(generic_ruts) >= 1:
+                prop_rut_raw, prop_snippet = generic_ruts[0]
+            if not arr_rut_raw and len(generic_ruts) >= 2:
+                arr_rut_raw, arr_snippet = generic_ruts[1]
+
+    arr_name = _extract_name(arr_snippet)
+    prop_name = _extract_name(prop_snippet)
+
     return {
-        "fecha_inicio": ai_data.get("fecha_inicio") or _find_date("inicio"),
-        "fecha_fin": ai_data.get("fecha_fin") or _find_date("termino|término|fin"),
-        "dia_pago": ai_data.get("dia_pago") or _find_int("dia de pago|día de pago"),
-        "renta_mensual": ai_data.get("renta_mensual") or _find_amount("renta mensual|canon|arriendo"),
-        "arrendatario_rut": ai_data.get("arrendatario_rut"),
-        "propietario_rut": ai_data.get("propietario_rut"),
+        "fecha_inicio": ai_data.get("fecha_inicio")
+        or start_written
+        or _find_date("inicio"),
+        "fecha_fin": ai_data.get("fecha_fin")
+        or end_written
+        or _find_date("termino|término|fin"),
+        "dia_pago": ai_data.get("dia_pago")
+        or _find_pay_day()
+        or 5,
+        "renta_mensual": ai_data.get("renta_mensual") or _pick_rent(),
+        "arrendatario_rut": ai_data.get("arrendatario_rut") or arr_rut_raw,
+        "propietario_rut": ai_data.get("propietario_rut") or prop_rut_raw,
+        "arrendatario_nombre": ai_data.get("arrendatario_nombre") or arr_name,
+        "propietario_nombre": ai_data.get("propietario_nombre") or prop_name,
     }
 
 
