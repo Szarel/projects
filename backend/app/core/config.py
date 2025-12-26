@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 60
     storage_dir: str = "storage"
     google_client_id: str | None = None
+    ai_api_key: str | None = None
+    ai_base_url: str = "https://integrate.api.nvidia.com/v1"
+    ai_model: str = "meta/llama3-70b-instruct"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

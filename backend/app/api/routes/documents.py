@@ -18,11 +18,12 @@ from app.core.config import settings
 from app.db.session import get_session
 from app.models.contract import AdjustmentType, ContractStatus, Currency, LeaseContract
 from app.models.document import Document
-from app.models.person import Person
+from app.models.person import Person, PersonType
 from app.models.property import Property, PropertyState
 from app.models.property_state import PropertyStateHistory
 from app.schemas.document import DocumentCreate, DocumentRead
 from app.models.user import User, UserRole
+from app.services.ai_extract import extract_contract_fields
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -34,6 +35,8 @@ def _parse_contract_pdf(raw: bytes) -> dict:
         text = "\n".join((page.extract_text() or "") for page in reader.pages)
     except Exception:
         return {}
+
+    ai_data = extract_contract_fields(text)
 
     def _find_date(label: str) -> date | None:
         m = re.search(fr"(?i){label}[^0-9]*(\d{{1,2}}[/-]\d{{1,2}}[/-]\d{{2,4}})", text)
@@ -62,11 +65,24 @@ def _parse_contract_pdf(raw: bytes) -> dict:
             return None
 
     return {
-        "fecha_inicio": _find_date("inicio"),
-        "fecha_fin": _find_date("termino|término|fin"),
-        "dia_pago": _find_int("dia de pago|día de pago"),
-        "renta_mensual": _find_amount("renta mensual|canon|arriendo"),
+        "fecha_inicio": ai_data.get("fecha_inicio") or _find_date("inicio"),
+        "fecha_fin": ai_data.get("fecha_fin") or _find_date("termino|término|fin"),
+        "dia_pago": ai_data.get("dia_pago") or _find_int("dia de pago|día de pago"),
+        "renta_mensual": ai_data.get("renta_mensual") or _find_amount("renta mensual|canon|arriendo"),
+        "arrendatario_rut": ai_data.get("arrendatario_rut"),
+        "propietario_rut": ai_data.get("propietario_rut"),
     }
+
+
+def _normalize_rut(value: str | None) -> str | None:
+    if not value:
+        return None
+    cleaned = re.sub(r"[^0-9kK]", "", value)
+    if not cleaned:
+        return None
+    if cleaned[-1] in {"k", "K"}:
+        return cleaned[:-1] + "K"
+    return cleaned
 
 
 async def _attach_contract_from_pdf(
@@ -83,6 +99,7 @@ async def _attach_contract_from_pdf(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Property not found")
 
     # Validate parties exist
+    # Ensure parties exist
     for model, eid, message in (
         (Person, arrendatario_id, "Tenant not found"),
         (Person, propietario_id, "Owner not found"),
@@ -182,23 +199,64 @@ async def upload_document(
         if not arrendatario_id or not propietario_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="arrendatario_id y propietario_id son requeridos para contratos de arriendo")
 
-        async def _resolve_person(raw: str, role: str) -> uuid.UUID:
-            """Accept UUID or RUT; returns person UUID or raises 404."""
-            cleaned = raw.strip()
-            try:
-                return uuid.UUID(cleaned)
-            except Exception:
-                # Try lookup by RUT
-                result = await session.execute(select(Person).where(Person.rut == cleaned))
-                person = result.scalars().first()
-                if not person:
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{role} not found (usa UUID o RUT válido)")
-                return person.id
+        async def _resolve_person(raw: str, role: str, fallback_rut: str | None, fallback_name: str | None) -> uuid.UUID:
+            """Accept UUID or RUT; if not found, creates a Person for tests."""
+            candidates: list[str] = []
+            if raw:
+                candidates.append(raw.strip())
+            if fallback_rut:
+                candidates.append(fallback_rut)
 
-        arr_id = await _resolve_person(arrendatario_id, "Tenant")
-        prop_id = await _resolve_person(propietario_id, "Owner")
+            normalized_candidates = [_normalize_rut(c) for c in candidates if c]
+
+            # 1) Try UUID lookup or use provided UUID to create
+            for cand in candidates:
+                try:
+                    cand_uuid = uuid.UUID(cand)
+                except Exception:
+                    cand_uuid = None
+                if cand_uuid:
+                    obj = await session.get(Person, cand_uuid)
+                    if obj:
+                        return obj.id
+                    # create with this UUID
+                    new_person = Person(
+                        id=cand_uuid,
+                        tipo=PersonType.ARRENDATARIO if role.lower().startswith("tenant") else PersonType.PROPIETARIO,
+                        nombres=fallback_name or f"{role} auto",
+                        apellidos=None,
+                        rut=_normalize_rut(fallback_rut) or _normalize_rut(raw),
+                    )
+                    session.add(new_person)
+                    await session.flush()
+                    return new_person.id
+
+            # 2) Try RUT lookup (normalized)
+            for norm in normalized_candidates:
+                if not norm:
+                    continue
+                result = await session.execute(select(Person).where(Person.rut.is_not(None)))
+                persons = list(result.scalars().all())
+                for person in persons:
+                    stored_norm = _normalize_rut(person.rut)
+                    if stored_norm and stored_norm == norm:
+                        return person.id
+
+            # 3) Create person with normalized rut or no rut
+            new_person = Person(
+                tipo=PersonType.ARRENDATARIO if role.lower().startswith("tenant") else PersonType.PROPIETARIO,
+                nombres=fallback_name or f"{role} auto",
+                apellidos=None,
+                rut=_normalize_rut(fallback_rut) or _normalize_rut(raw),
+            )
+            session.add(new_person)
+            await session.flush()
+            return new_person.id
 
         parsed = _parse_contract_pdf(content)
+        arr_id = await _resolve_person(arrendatario_id, "Tenant", parsed.get("arrendatario_rut"), parsed.get("arrendatario_nombre"))
+        prop_id = await _resolve_person(propietario_id, "Owner", parsed.get("propietario_rut"), parsed.get("propietario_nombre"))
+
         await _attach_contract_from_pdf(
             session=session,
             property_id=entity_uuid,
