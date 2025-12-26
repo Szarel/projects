@@ -152,7 +152,10 @@ function App() {
       }
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
     } catch (err: any) {
-      setError("No se pudo abrir el documento");
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      const extra = detail ? `: ${typeof detail === "string" ? detail : JSON.stringify(detail)}` : "";
+      setError(`No se pudo abrir el documento${status ? ` (${status})` : ""}${extra}`);
     }
   };
 
