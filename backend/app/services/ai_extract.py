@@ -1,4 +1,3 @@
-import base64
 import json
 from datetime import datetime
 from typing import Any, Dict
@@ -111,21 +110,20 @@ def extract_payment_from_image(raw: bytes, mime_type: str | None = None) -> Dict
         "referencia (codigo de transaccion u observacion). Si falta un dato usa null. No inventes montos."
     )
 
-    try:
-        b64 = base64.b64encode(raw).decode("utf-8")
-        resp = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=[
-                {
-                    "role": "user",
-                    "parts": [
-                        prompt,
-                        {"inline_data": {"mime_type": mime, "data": b64}},
-                    ],
-                }
-            ],
-        )
-        content = (resp.text or "").strip()
+    def _first_text(resp: Any) -> str:
+        try:
+            for cand in getattr(resp, "candidates", []) or []:
+                parts = getattr(getattr(cand, "content", None), "parts", []) or []
+                for p in parts:
+                    txt = getattr(p, "text", None)
+                    if txt:
+                        return str(txt)
+        except Exception:
+            return ""
+        return ""
+
+    def _parse_response(resp: Any) -> Dict[str, Any]:
+        content = (getattr(resp, "text", "") or _first_text(resp) or "").strip()
         if not content:
             return {}
         if content.startswith("`"):
@@ -135,8 +133,6 @@ def extract_payment_from_image(raw: bytes, mime_type: str | None = None) -> Dict
         data = json.loads(content)
         if not isinstance(data, dict):
             return {}
-
-        # Normalize date format if model returned a timestamp or other format.
         raw_date = data.get("fecha_pago")
         if raw_date:
             try:
@@ -144,7 +140,22 @@ def extract_payment_from_image(raw: bytes, mime_type: str | None = None) -> Dict
                 data["fecha_pago"] = parsed.isoformat()
             except Exception:
                 data["fecha_pago"] = None
-
         return data
+
+    try:
+        # Try sending raw bytes first.
+        resp = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=[{"role": "user", "parts": [prompt, {"inline_data": {"mime_type": mime, "data": raw}}]}],
+        )
+        data = _parse_response(resp)
+        if data:
+            return data
+        # Fallback: if empty, retry once (some clients require bytes-like again).
+        resp2 = client.models.generate_content(
+            model=settings.gemini_model,
+            contents=[{"role": "user", "parts": [prompt, {"inline_data": {"mime_type": mime, "data": raw}}]}],
+        )
+        return _parse_response(resp2)
     except Exception:
         return {}
