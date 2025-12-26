@@ -58,9 +58,10 @@ def _sanitize_database_url(raw_url: str) -> tuple[URL, dict]:
             connect_args["ssl"] = ctx
 
     # PgBouncer/Poolers: avoid prepared statements to prevent DuplicatePreparedStatementError.
-    # Force both caches to zero on every connection.
+    # Force caches to zero and force simple-query mode via prepare_threshold=0.
     query = dict(url.query)
     connect_args["statement_cache_size"] = 0
+    connect_args.setdefault("server_settings", {})["prepare_threshold"] = "0"
     query["prepared_statement_cache_size"] = "0"
     url = url.set(query=query)
 
