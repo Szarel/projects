@@ -1,3 +1,4 @@
+import base64
 import json
 from datetime import datetime
 from typing import Any, Dict
@@ -111,6 +112,7 @@ def extract_payment_from_image(raw: bytes, mime_type: str | None = None) -> Dict
     )
 
     try:
+        b64 = base64.b64encode(raw).decode("utf-8")
         resp = client.models.generate_content(
             model=settings.gemini_model,
             contents=[
@@ -118,7 +120,7 @@ def extract_payment_from_image(raw: bytes, mime_type: str | None = None) -> Dict
                     "role": "user",
                     "parts": [
                         prompt,
-                        {"inline_data": {"mime_type": mime, "data": raw}},
+                        {"inline_data": {"mime_type": mime, "data": b64}},
                     ],
                 }
             ],
