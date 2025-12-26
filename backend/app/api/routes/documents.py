@@ -244,11 +244,32 @@ async def _attach_contract_from_pdf(
     prop = await session.get(Property, property_id)
     if not prop:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Property not found")
+    def _coerce_date(value: Any, default: date | None = None) -> date | None:
+        if isinstance(value, date):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value).date()
+            except Exception:
+                pass
+        return default
 
-    start_date: date = parsed.get("fecha_inicio") or date.today()
-    end_date: date = parsed.get("fecha_fin") or (start_date + timedelta(days=365))
-    pay_day: int | None = parsed.get("dia_pago") or 5
-    renta: Decimal = parsed.get("renta_mensual") or (prop.valor_arriendo or Decimal("0"))
+    def _coerce_int(value: Any, default: int | None = None) -> int | None:
+        try:
+            return int(value)
+        except Exception:
+            return default
+
+    def _coerce_decimal(value: Any, default: Decimal | None = None) -> Decimal | None:
+        try:
+            return Decimal(str(value))
+        except Exception:
+            return default
+
+    start_date = _coerce_date(parsed.get("fecha_inicio"), date.today())
+    end_date = _coerce_date(parsed.get("fecha_fin"), (start_date or date.today()) + timedelta(days=365))
+    pay_day: int | None = _coerce_int(parsed.get("dia_pago"), 5)
+    renta: Decimal = _coerce_decimal(parsed.get("renta_mensual"), prop.valor_arriendo or Decimal("0"))
 
     contract = LeaseContract(
         propiedad_id=prop.id,
