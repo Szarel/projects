@@ -39,6 +39,12 @@ export async function login(username: string, password: string): Promise<string>
   return data.access_token as string;
 }
 
+export async function loginWithGoogle(idToken: string): Promise<string> {
+  const { data } = await api.post("/auth/google", { id_token: idToken });
+  setToken(data.access_token);
+  return data.access_token as string;
+}
+
 export type Property = {
   id: string;
   codigo: string;

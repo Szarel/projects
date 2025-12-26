@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     secret_key: str = "change-this"
     access_token_expire_minutes: int = 60
     storage_dir: str = "storage"
+    google_client_id: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

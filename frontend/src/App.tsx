@@ -10,6 +10,7 @@ import {
   fetchPropertyFull,
   downloadDocument,
   deleteDocument,
+  replaceDocument,
 } from "./api";
 import Login from "./components/Login";
 import Dashboard from "./components/Dashboard";
@@ -20,6 +21,7 @@ function App() {
   const [geojson, setGeojson] = useState<any>({ type: "FeatureCollection", features: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [prefetching, setPrefetching] = useState(false);
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [newProp, setNewProp] = useState({
@@ -43,6 +45,23 @@ function App() {
   const [detail, setDetail] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
+  const [detailsCache, setDetailsCache] = useState<Record<string, any>>({});
+
+  async function prefetchDetails(props: Property[]) {
+    if (!props.length) return;
+    setPrefetching(true);
+    try {
+      await Promise.allSettled(
+        props.map(async (p) => {
+          if (detailsCache[p.id]) return;
+          const full = await fetchPropertyFull(p.id);
+          setDetailsCache((prev) => (prev[p.id] ? prev : { ...prev, [p.id]: full }));
+        })
+      );
+    } finally {
+      setPrefetching(false);
+    }
+  }
 
   useEffect(() => {
     if (!token) {
@@ -55,6 +74,7 @@ function App() {
         const [props, geo] = await Promise.all([fetchProperties(), fetchGeoJson()]);
         setProperties(props);
         setGeojson(geo);
+        prefetchDetails(props);
       } catch (e: any) {
         if (e?.response?.status === 401) {
           setToken(null);
@@ -81,6 +101,7 @@ function App() {
     setTokenState(null);
     setProperties([]);
     setGeojson({ type: "FeatureCollection", features: [] });
+    setDetailsCache({});
   };
 
   const handleCreateProperty = async (e: React.FormEvent) => {
@@ -115,6 +136,9 @@ function App() {
     setError(null);
     try {
       await uploadDocument(selectedProp, docFile, docCategoria);
+      const full = await fetchPropertyFull(selectedProp);
+      setDetailsCache((prev) => ({ ...prev, [selectedProp]: full }));
+      if (detailId === selectedProp) setDetail(full);
     } catch (err: any) {
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
@@ -130,10 +154,17 @@ function App() {
     setSelectedProp(id);
     setDetailId(id);
     setShowDetail(true);
-    setDetailLoading(true);
     setError(null);
+    const cached = detailsCache[id];
+    if (cached) {
+      setDetail(cached);
+      setDetailLoading(false);
+    } else {
+      setDetailLoading(true);
+    }
     try {
       const full = await fetchPropertyFull(id);
+      setDetailsCache((prev) => ({ ...prev, [id]: full }));
       setDetail(full);
     } catch (err: any) {
       setError("No se pudo cargar la ficha");
@@ -165,6 +196,7 @@ function App() {
     try {
       await deleteDocument(docId);
       const full = await fetchPropertyFull(detailId);
+      setDetailsCache((prev) => ({ ...prev, [detailId]: full }));
       setDetail(full);
     } catch (err: any) {
       const status = err?.response?.status;
@@ -181,6 +213,7 @@ function App() {
     try {
       await replaceDocument(doc.id, file, doc.categoria);
       const full = await fetchPropertyFull(detailId);
+      setDetailsCache((prev) => ({ ...prev, [detailId]: full }));
       setDetail(full);
     } catch (err: any) {
       const status = err?.response?.status;
@@ -256,7 +289,13 @@ function App() {
   };
 
   if (!token) return <Login onSuccess={handleLogin} />;
-  if (loading) return <div className="page">Cargando...</div>;
+  if (loading)
+    return (
+      <div className="loading-screen">
+        <div className="spinner" aria-hidden="true" />
+        <p>Preparando datos...</p>
+      </div>
+    );
   if (error) return <div className="page error">{error}</div>;
 
   return (
@@ -264,6 +303,7 @@ function App() {
       <header className="topbar">
         <span>SIGAP – Mapa de Propiedades</span>
         <div className="top-actions">
+          {prefetching && <span className="prefetch-pill">Sincronizando datos…</span>}
           <button onClick={() => setShowModal(true)}>Agregar propiedad</button>
           <button className="ghost" onClick={handleLogout}>
             Cerrar sesión
