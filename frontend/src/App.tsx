@@ -8,6 +8,8 @@ import {
   createProperty,
   uploadDocument,
   fetchPropertyFull,
+  downloadDocument,
+  deleteDocument,
 } from "./api";
 import Login from "./components/Login";
 import Dashboard from "./components/Dashboard";
@@ -137,6 +139,50 @@ function App() {
       setError("No se pudo cargar la ficha");
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const handleOpenDocument = async (docId: string, filename: string) => {
+    try {
+      const blob = await downloadDocument(docId);
+      const url = URL.createObjectURL(blob);
+      const newWindow = window.open(url, "_blank");
+      if (!newWindow) {
+        setError("No se pudo abrir la pestaña");
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (err: any) {
+      setError("No se pudo abrir el documento");
+    }
+  };
+
+  const handleDeleteDocument = async (docId: string) => {
+    if (!detailId) return;
+    if (!confirm("¿Eliminar este documento?")) return;
+    try {
+      await deleteDocument(docId);
+      const full = await fetchPropertyFull(detailId);
+      setDetail(full);
+    } catch (err: any) {
+      setError("No se pudo eliminar el documento");
+    }
+  };
+
+  const handleReplaceDocument = async (doc: any, file: File) => {
+    if (!detailId) return;
+    setUploading(true);
+    setError(null);
+    try {
+      await uploadDocument(detailId, file, doc.categoria, doc.entidad_tipo);
+      const full = await fetchPropertyFull(detailId);
+      setDetail(full);
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail;
+      const extra = detail ? `: ${typeof detail === "string" ? detail : JSON.stringify(detail)}` : "";
+      setError(`No se pudo subir el documento${status ? ` (${status})` : ""}${extra}`);
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -444,11 +490,39 @@ function App() {
                 <div className="card">
                   <h4>Documentos</h4>
                   {detail.documents?.length ? (
-                    <ul>
+                    <div className="doc-list">
                       {detail.documents.map((d: any) => (
-                        <li key={d.id}>{d.categoria} · {d.filename} (v{d.version})</li>
+                        <div key={d.id} className="doc-row">
+                          <div>
+                            <div>{d.categoria} · {d.filename}</div>
+                            <div className="muted">v{d.version}</div>
+                          </div>
+                          <div className="doc-actions">
+                            <button type="button" className="link" onClick={() => handleOpenDocument(d.id, d.filename)}>
+                              Abrir
+                            </button>
+                            <button type="button" className="link" onClick={() => handleDeleteDocument(d.id)}>
+                              Eliminar
+                            </button>
+                            <label className="link">
+                              Reemplazar
+                              <input
+                                type="file"
+                                className="sr-only"
+                                accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    handleReplaceDocument(d, file);
+                                    e.target.value = "";
+                                  }
+                                }}
+                              />
+                            </label>
+                          </div>
+                        </div>
                       ))}
-                    </ul>
+                    </div>
                   ) : (
                     <p className="muted">Sin documentos</p>
                   )}

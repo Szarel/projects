@@ -82,3 +82,28 @@ async def download_document(
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_410_GONE, detail="File missing on storage")
     return FileResponse(path, filename=document.filename)
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    document_id: uuid.UUID,
+    session: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_roles(UserRole.ADMIN, UserRole.CORREDOR, UserRole.FINANZAS)),
+):
+    document = await session.get(Document, document_id)
+    if not document or not document.activo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
+    document.activo = False
+    await session.commit()
+
+    # Best-effort: remove file from storage if exists.
+    try:
+        path = Path(document.storage_path)
+        if path.exists():
+            path.unlink(missing_ok=True)
+    except Exception:
+        # Do not fail deletion if file removal fails.
+        pass
+
+    return None
