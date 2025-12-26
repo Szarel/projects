@@ -231,7 +231,11 @@ async def get_property_full(
 
     docs_result = await session.execute(
         select(Document)
-        .where(Document.entidad_tipo == "propiedad", Document.entidad_id == property_id)
+        .where(
+            Document.entidad_tipo == "propiedad",
+            Document.entidad_id == property_id,
+            Document.activo.is_(True),
+        )
         .order_by(Document.created_at.desc())
     )
     documents = [

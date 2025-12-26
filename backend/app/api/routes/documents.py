@@ -29,6 +29,7 @@ async def list_documents(
         stmt = stmt.where(Document.entidad_tipo == entidad_tipo)
     if entidad_id:
         stmt = stmt.where(Document.entidad_id == uuid.UUID(entidad_id))
+    stmt = stmt.where(Document.activo.is_(True))
     result = await session.execute(stmt.order_by(Document.created_at.desc()))
     return list(result.scalars().all())
 
