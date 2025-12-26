@@ -428,74 +428,80 @@ async def upload_document(
         parsed = extract_payment_from_image(content, file.content_type)
         prop = await session.get(Property, entity_uuid)
 
-        if parsed and prop:
-            try:
-                amount = Decimal(str(parsed.get("monto_pagado")))
-            except Exception:
-                amount = None
+        if not parsed:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No se pudo leer el comprobante")
+        if not prop:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Propiedad no existe")
 
-            if amount:
-                raw_date = parsed.get("fecha_pago")
-                try:
-                    pay_date = datetime.fromisoformat(str(raw_date)).date() if raw_date else date.today()
-                except Exception:
-                    pay_date = date.today()
+        try:
+            amount = Decimal(str(parsed.get("monto_pagado")))
+        except Exception:
+            amount = None
+        if amount is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El comprobante no tiene monto válido")
 
-                medio = parsed.get("medio_pago")
-                referencia = parsed.get("referencia")
+        raw_date = parsed.get("fecha_pago")
+        try:
+            pay_date = datetime.fromisoformat(str(raw_date)).date() if raw_date else date.today()
+        except Exception:
+            pay_date = date.today()
 
-                contract_q = await session.execute(
-                    select(LeaseContract)
-                    .where(LeaseContract.propiedad_id == entity_uuid, LeaseContract.estado == ContractStatus.VIGENTE)
-                    .order_by(LeaseContract.fecha_inicio.desc())
-                    .limit(1)
-                )
-                contract = contract_q.scalars().first()
+        medio = parsed.get("medio_pago")
+        referencia = parsed.get("referencia")
 
-                if contract:
-                    periodo = date(pay_date.year, pay_date.month, 1)
-                    charge_q = await session.execute(
-                        select(Charge).where(Charge.contrato_id == contract.id, Charge.periodo == periodo).limit(1)
-                    )
-                    charge = charge_q.scalars().first()
+        contract_q = await session.execute(
+            select(LeaseContract)
+            .where(LeaseContract.propiedad_id == entity_uuid, LeaseContract.estado == ContractStatus.VIGENTE)
+            .order_by(LeaseContract.fecha_inicio.desc())
+            .limit(1)
+        )
+        contract = contract_q.scalars().first()
+        if not contract:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La propiedad no tiene contrato vigente para asociar el pago")
 
-                    if not charge:
-                        charge = Charge(
-                            contrato_id=contract.id,
-                            periodo=periodo,
-                            monto_original=amount,
-                            monto_ajustado=None,
-                            fecha_vencimiento=pay_date,
-                            estado=ChargeState.PENDIENTE,
-                        )
-                        session.add(charge)
-                        await session.flush()
+        periodo = date(pay_date.year, pay_date.month, 1)
+        charge_q = await session.execute(
+            select(Charge).where(Charge.contrato_id == contract.id, Charge.periodo == periodo).limit(1)
+        )
+        charge = charge_q.scalars().first()
 
-                    payment = PaymentDetail(
-                        cobranza_id=charge.id,
-                        monto_pagado=amount,
-                        fecha_pago=pay_date,
-                        medio_pago=medio,
-                        referencia=referencia,
-                    )
-                    session.add(payment)
-                    await session.flush()
+        if not charge:
+            charge = Charge(
+                contrato_id=contract.id,
+                periodo=periodo,
+                monto_original=amount,
+                monto_ajustado=None,
+                fecha_vencimiento=pay_date,
+                estado=ChargeState.PENDIENTE,
+            )
+            session.add(charge)
+            await session.flush()
 
-                    total_pagado_result = await session.execute(
-                        select(func.coalesce(func.sum(PaymentDetail.monto_pagado), 0)).where(
-                            PaymentDetail.cobranza_id == charge.id
-                        )
-                    )
-                    total_pagado: Decimal = total_pagado_result.scalar() or Decimal("0")
-                    monto_objetivo = charge.monto_ajustado or charge.monto_original
+        payment = PaymentDetail(
+            cobranza_id=charge.id,
+            monto_pagado=amount,
+            fecha_pago=pay_date,
+            medio_pago=medio,
+            referencia=referencia,
+        )
+        session.add(payment)
+        await session.flush()
 
-                    if total_pagado >= monto_objetivo:
-                        charge.estado = ChargeState.PAGADO
-                        charge.fecha_pago = payment.fecha_pago
-                    elif total_pagado > 0:
-                        charge.estado = ChargeState.PARCIAL
-                    else:
-                        charge.estado = ChargeState.PENDIENTE
+        total_pagado_result = await session.execute(
+            select(func.coalesce(func.sum(PaymentDetail.monto_pagado), 0)).where(
+                PaymentDetail.cobranza_id == charge.id
+            )
+        )
+        total_pagado: Decimal = total_pagado_result.scalar() or Decimal("0")
+        monto_objetivo = charge.monto_ajustado or charge.monto_original
+
+        if total_pagado >= monto_objetivo:
+            charge.estado = ChargeState.PAGADO
+            charge.fecha_pago = payment.fecha_pago
+        elif total_pagado > 0:
+            charge.estado = ChargeState.PARCIAL
+        else:
+            charge.estado = ChargeState.PENDIENTE
 
     await session.commit()
     await session.refresh(document)
